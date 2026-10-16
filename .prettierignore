@@ -1,0 +1,14 @@
+# Gerados ou de terceiros
+pnpm-lock.yaml
+**/dist/
+**/coverage/
+**/.expo/
+apps/*/android/
+apps/*/ios/
+apps/api/prisma/migrations/
+apps/api/src/compartilhado/infra/gerado/
+
+# Documentos de produto e configuração dos agentes: escritos à mão, fora do Prettier
+docs/produto/
+.claude/
+CLAUDE.md

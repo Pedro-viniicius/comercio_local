@@ -1,0 +1,3 @@
+- [Áreas sensíveis](areas-sensiveis.md) — onde mora dado pessoal, entradas públicas, auth e invariantes do Bairrin
+- [Riscos aceitos](riscos-aceitos.md) — aceites explícitos do dono (nenhum até 2026-10-16)
+- [Problemas recorrentes](problemas-recorrentes.md) — falhas a procurar sempre em planos e código

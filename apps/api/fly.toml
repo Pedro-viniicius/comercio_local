@@ -1,0 +1,76 @@
+# App Fly da API e do worker (mesma imagem, dois processos), em São Paulo (gru).
+# O contexto do build é a raiz do monorepo; rode o deploy a partir dela:
+#   fly deploy -c apps/api/fly.toml
+# Domínio: api.bairrin.com.br, depois do registro de bairrin.com.br
+# (`fly certs add api.bairrin.com.br -c apps/api/fly.toml`).
+#
+# Segredos (só em `fly secrets set -c apps/api/fly.toml`, nunca aqui nem no repositório):
+#   DATABASE_URL, DATABASE_URL_MIGRACAO, JWT_SEGREDO, CHAVE_CIFRAGEM_DADOS, CHAVE_HMAC,
+#   SMTP_URL e, se houver, SENTRY_DSN.
+# As duas URLs do banco (Supabase, sa-east-1) terminam com
+#   ?sslmode=verify-full&sslrootcert=/app/certificados/supabase-ca.crt
+# e a API, o worker e o release_command recusam outra forma em produção (S21).
+
+app = "bairrin-api"
+primary_region = "gru"
+
+[build]
+  # Caminho relativo a este arquivo (o flyctl resolve a partir da pasta do fly.toml).
+  dockerfile = "Dockerfile"
+
+# Valores que não são segredo. A API valida tudo ao subir e não sobe se faltar algo.
+[env]
+  NODE_ENV = "production"
+  PORTA = "3000"
+  LOG_NIVEL = "info"
+  CORS_ORIGENS = "https://painel.bairrin.com.br"
+  EMAIL_REMETENTE = "nao-responda@bairrin.com.br"
+
+[deploy]
+  # Migrações antes de trocar as máquinas: `prisma migrate deploy` e o passo do pg-boss, com o
+  # papel de migração (dono dos schemas). Se falhar, o deploy para e a versão anterior continua.
+  # É o único comando que usa DATABASE_URL_MIGRACAO (S3).
+  release_command = "node --run migrar"
+  release_command_timeout = "5m"
+  strategy = "rolling"
+
+# Os segredos do Fly chegam a todas as máquinas. Os dois processos tiram DATABASE_URL_MIGRACAO
+# do ambiente antes de iniciar (`env -u`), e a API e o worker se recusam a subir se ela estiver
+# presente em produção (S3): só o release_command tem o papel de migração.
+[processes]
+  app = "env -u DATABASE_URL_MIGRACAO node --enable-source-maps dist/main.js"
+  worker = "env -u DATABASE_URL_MIGRACAO node --enable-source-maps dist/worker.js"
+
+[http_service]
+  processes = ["app"]
+  internal_port = 3000
+  # HTTP -> HTTPS no proxy do Fly, onde o TLS termina.
+  force_https = true
+  # A API fica sempre no ar (pedidos com prazo de aceite, polling dos apps).
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Vivo sem tocar no banco: uma queda do banco não faz o Fly reciclar a máquina.
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/v1/saude"
+
+# 1 GB para a API e 512 MB para o worker (estimativa de custo do 00-arquitetura).
+[[vm]]
+  processes = ["app"]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+[[vm]]
+  processes = ["worker"]
+  size = "shared-cpu-1x"
+  memory = "512mb"

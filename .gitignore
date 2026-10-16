@@ -1,0 +1,44 @@
+# Dependências
+node_modules/
+
+# Saídas de build, cobertura e caches
+dist/
+build/
+coverage/
+web-build/
+*.tsbuildinfo
+.eslintcache
+
+# Variáveis de ambiente: nenhum .env entra no repositório, só os modelos
+.env*
+!.env.example
+
+# Expo e React Native
+.expo/
+expo-env.d.ts
+.metro-health-check*
+.kotlin/
+*.orig.*
+# Pastas nativas geradas pelo `expo prebuild`
+apps/*/android/
+apps/*/ios/
+
+# Chaves e certificados de assinatura nunca entram no repositório
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+
+# Logs e sistema
+*.log
+npm-debug.*
+.DS_Store
+
+# Configuração local do Claude Code
+.claude/settings.local.json
+
+# Client do Prisma gerado por `prisma generate` (apps/api/prisma/schema.prisma)
+apps/api/src/compartilhado/infra/gerado/

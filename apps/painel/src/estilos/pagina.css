@@ -1,0 +1,133 @@
+/* Estilo da página de estado da API. Só usa variáveis de tokens.css.ts (cores semânticas). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--cor-bg-canvas);
+  color: var(--cor-text-primary);
+  font-family: var(--fonte-familia-base);
+  font-size: var(--fonte-body-tamanho);
+  line-height: var(--fonte-body-altura-linha);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cor-focus-ring);
+  outline-offset: 2px;
+}
+
+.pagina {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-6);
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--espaco-8) var(--espaco-4);
+}
+
+.pagina__titulo {
+  font-size: var(--fonte-display-tamanho);
+  line-height: var(--fonte-display-altura-linha);
+  font-weight: var(--peso-semibold);
+}
+
+.cartao {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--espaco-4);
+  padding: var(--espaco-6);
+  background: var(--cor-bg-surface);
+  border: 1px solid var(--cor-border-subtle);
+  border-radius: var(--raio-lg);
+}
+
+.cartao__titulo {
+  font-size: var(--fonte-title-sm-tamanho);
+  line-height: var(--fonte-title-sm-altura-linha);
+  font-weight: var(--peso-semibold);
+}
+
+.estado {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--espaco-3);
+  width: 100%;
+  padding: var(--espaco-3) var(--espaco-4);
+  border-radius: var(--raio-md);
+}
+
+.estado--neutro {
+  background: var(--cor-status-neutral-bg);
+  color: var(--cor-status-neutral-fg);
+}
+
+.estado--sucesso {
+  background: var(--cor-status-success-bg);
+  color: var(--cor-status-success-fg);
+}
+
+.estado--aviso {
+  background: var(--cor-status-warning-bg);
+  color: var(--cor-status-warning-fg);
+}
+
+.estado--perigo {
+  background: var(--cor-status-danger-bg);
+  color: var(--cor-status-danger-fg);
+}
+
+.estado__simbolo {
+  font-weight: var(--peso-semibold);
+}
+
+.estado__texto {
+  font-weight: var(--peso-semibold);
+}
+
+.estado__dica {
+  font-size: var(--fonte-body-sm-tamanho);
+  line-height: var(--fonte-body-sm-altura-linha);
+}
+
+.botao {
+  min-height: var(--tamanho-controle-web);
+  padding: 0 var(--espaco-4);
+  border: 0;
+  border-radius: var(--raio-md);
+  background: var(--cor-action-primary);
+  color: var(--cor-text-on-action);
+  font: inherit;
+  font-weight: var(--peso-semibold);
+  cursor: pointer;
+  transition: background var(--duracao-fast) var(--easing-standard);
+}
+
+.botao:hover,
+.botao:active {
+  background: var(--cor-action-primary-pressed);
+}
+
+.botao:active {
+  transform: translateY(1px);
+}
+
+/* Verificando de novo: o botão continua focável (foco não se perde), só não age. */
+.botao[aria-disabled='true'],
+.botao[aria-disabled='true']:hover,
+.botao[aria-disabled='true']:active {
+  background: var(--cor-bg-subtle);
+  color: var(--cor-text-tertiary);
+  border: 1px solid var(--cor-border-subtle);
+  cursor: default;
+  transform: none;
+}

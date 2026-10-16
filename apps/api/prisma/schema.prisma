@@ -1,0 +1,82 @@
+// Modelo do banco do Bairrin. Cada contexto tem schema Postgres próprio e nada
+// fica em `public` (S2). As tabelas, permissões, RLS e triggers nascem no SQL
+// revisado de `prisma/migrations` (`prisma migrate dev --create-only`); este
+// arquivo descreve as mesmas tabelas para o client tipado.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/compartilhado/infra/gerado/prisma"
+  moduleFormat        = "esm"
+  runtime             = "nodejs"
+  // Imports com `.ts`, reescritos para `.js` pelo tsc (como o resto da API).
+  importFileExtension = "ts"
+  // Índice parcial da outbox (`WHERE publicado_em IS NULL`); sem ele, o
+  // `migrate dev` tentaria apagar o índice criado no SQL.
+  previewFeatures     = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["compartilhado"]
+}
+
+/// Eventos de domínio gravados na mesma transação do caso de uso e publicados
+/// pelo relay do worker. O payload leva só ids, nunca token nem senha.
+model Outbox {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipo        String
+  versao      Int
+  agregadoId  String    @map("agregado_id") @db.Uuid
+  payload     Json
+  ocorridoEm  DateTime  @map("ocorrido_em") @db.Timestamptz(6)
+  publicadoEm DateTime? @map("publicado_em") @db.Timestamptz(6)
+
+  @@index([ocorridoEm], map: "outbox_pendentes_idx", where: raw("publicado_em IS NULL"))
+  @@map("outbox")
+  @@schema("compartilhado")
+}
+
+/// Deduplicação: um evento é processado uma única vez por assinante.
+model EventoProcessado {
+  eventoId     String   @map("evento_id") @db.Uuid
+  assinante    String
+  processadoEm DateTime @map("processado_em") @db.Timestamptz(6)
+
+  @@id([eventoId, assinante])
+  @@map("eventos_processados")
+  @@schema("compartilhado")
+}
+
+/// Trilha de auditoria, somente acréscimo: a aplicação não tem UPDATE, DELETE
+/// nem TRUNCATE, e triggers barram essas operações até para o dono (S3).
+/// `antes` e `depois` nunca levam dado pessoal (S4).
+model Auditoria {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  atorTipo   String   @map("ator_tipo")
+  atorId     String?  @map("ator_id") @db.Uuid
+  acao       String
+  recurso    String
+  recursoId  String   @map("recurso_id")
+  antes      Json?
+  depois     Json?
+  origem     String
+  ocorridoEm DateTime @map("ocorrido_em") @db.Timestamptz(6)
+
+  @@map("auditoria")
+  @@schema("compartilhado")
+}
+
+/// Configurações versionadas: o valor vigente de uma chave é o mais recente
+/// com `vigente_desde <= now()`.
+model Configuracao {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  chave        String
+  valor        Json
+  vigenteDesde DateTime @map("vigente_desde") @db.Timestamptz(6)
+  autorId      String?  @map("autor_id") @db.Uuid
+  criadoEm     DateTime @map("criado_em") @db.Timestamptz(6)
+
+  @@index([chave, vigenteDesde(sort: Desc)], map: "configuracoes_chave_vigente_idx")
+  @@map("configuracoes")
+  @@schema("compartilhado")
+}

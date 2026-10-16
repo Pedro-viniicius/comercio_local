@@ -1,0 +1,26 @@
+# Workspace do Bairrin. Desde o pnpm 11, as configurações do projeto ficam aqui;
+# o .npmrc só é lido para registry e autenticação.
+packages:
+  - apps/*
+  - packages/*
+
+# Cadeia de suprimentos (S12): versões exatas ao adicionar dependência,
+# nenhuma versão com menos de 3 dias de publicada (4320 minutos), inclusive
+# as transitivas, e scripts de instalação só dos pacotes listados em allowBuilds.
+saveExact: true
+minimumReleaseAge: 4320
+strictDepBuilds: true
+allowBuilds:
+  # Prisma: confere a versão do Node e baixa o schema engine usado pelo migrate.
+  '@prisma/engines': true
+  prisma: true
+  # esbuild: valida o binário nativo. Nenhum pacote o declara; entra como par opcional do
+  # Vite (junto com o tsx), resolvido no lockfile.
+  esbuild: true
+
+# Versões compartilhadas por mais de um pacote, fixadas num lugar só.
+catalog:
+  '@types/node': 22.20.5
+  typescript: 6.0.3
+  vitest: 5.0.4
+  zod: 4.6.7

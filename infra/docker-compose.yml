@@ -1,0 +1,98 @@
+# Infraestrutura local do Bairrin: Postgres de desenvolvimento, Postgres de teste e Mailpit.
+# Uso: docker compose -f infra/docker-compose.yml up -d --wait
+#
+# SOMENTE DESENVOLVIMENTO LOCAL. As senhas abaixo e as de infra/postgres/init/01-papeis.sql
+# são públicas, ficam no repositório de propósito e não valem em nenhum outro ambiente.
+# Homologação e produção usam o Supabase, com senhas próprias guardadas só nos segredos do Fly.
+# Todas as portas ficam presas a 127.0.0.1: nada fica exposto na rede local.
+#
+# Papéis de banco (os mesmos nos dois Postgres, criados por 01-papeis.sql na primeira subida):
+# - postgres: superusuário da imagem, só para administração manual; a aplicação não usa.
+# - bairrin_migracao: dono do banco e dos schemas; usado só por migrações (DATABASE_URL_MIGRACAO).
+# - bairrin_app: papel da aplicação, só DML depois dos GRANTs das migrações (DATABASE_URL).
+
+name: bairrin
+
+services:
+  postgres:
+    # Major 17: a mais recente que o Supabase oferece hoje (o 18 ainda não está disponível lá).
+    image: postgres:17.11-trixie
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_postgres_somente_local
+      POSTGRES_DB: bairrin
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-dev:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Por TCP de propósito: durante a inicialização (scripts de init) o servidor só escuta no
+      # socket Unix, então "pronto" aqui significa que os papéis já foram criados.
+      test:
+        ['CMD', 'pg_isready', '-h', '127.0.0.1', '-p', '5432', '-U', 'postgres', '-d', 'bairrin']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+      start_interval: 1s
+
+  postgres-teste:
+    image: postgres:17.11-trixie
+    # Banco descartável para os testes de integração: dados em memória (tmpfs) e durabilidade
+    # desligada para acelerar. Cada subida do container começa vazia e roda 01-papeis.sql de novo.
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_postgres_somente_local
+      POSTGRES_DB: bairrin_teste
+    ports:
+      - '127.0.0.1:5433:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'pg_isready',
+          '-h',
+          '127.0.0.1',
+          '-p',
+          '5432',
+          '-U',
+          'postgres',
+          '-d',
+          'bairrin_teste',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+      start_interval: 1s
+
+  mailpit:
+    # Captura todo e-mail enviado em dev e nos testes; nada sai para a internet.
+    # Web em http://127.0.0.1:8025; SMTP sem autenticação em 127.0.0.1:1025.
+    image: axllent/mailpit:v1.31.5
+    ports:
+      - '127.0.0.1:8025:8025'
+      - '127.0.0.1:1025:1025'
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+      start_interval: 1s
+
+volumes:
+  postgres-dev:

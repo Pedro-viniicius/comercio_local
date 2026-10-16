@@ -1,0 +1,45 @@
+# Atualizações automáticas de dependências (S12). Cada PR do Dependabot passa pelo CI inteiro,
+# inclusive `pnpm audit`. `cooldown` espera 3 dias depois da publicação, a mesma regra do
+# `minimumReleaseAge` do pnpm-workspace.yaml.
+version: 2
+updates:
+  # Pacotes do monorepo (pnpm-lock.yaml na raiz cobre todos os apps e pacotes).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 10
+    groups:
+      # Correções e versões menores juntas; major sempre em PR próprio.
+      menores:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # Actions fixadas por SHA nos workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    cooldown:
+      default-days: 3
+
+  # Imagens base (tag e digest fixos) dos Dockerfiles da API e do painel.
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/painel
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    cooldown:
+      default-days: 3

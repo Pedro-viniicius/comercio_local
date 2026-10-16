@@ -1,0 +1,62 @@
+# Servidor do painel (S9): só arquivos estáticos do build do Vite, em HTTP na porta interna 8080.
+# O TLS termina no proxy do Fly (`force_https` no fly.toml); o HSTS sai daqui porque o Fly não o
+# acrescenta.
+{
+	# Sem admin API: nada escuta em localhost:2019 e a configuração não muda em tempo de execução.
+	admin off
+	# Não grava cópia da configuração em /config (processo sem root, disco pode ser só leitura).
+	persist_config off
+	# Sem certificados nem redirecionamento HTTP -> HTTPS: isso é papel do proxy do Fly.
+	auto_https off
+}
+
+# Cabeçalhos de segurança de toda resposta: entram no site e no tratamento de erros (sem o
+# `handle_errors`, as respostas 404 e 405 sairiam sem eles e com `Server: Caddy`).
+# CSP: só o que o build usa. Script e CSS vêm de arquivos em /assets (o polyfill de
+# modulepreload do Vite vai dentro do bundle, não inline), então não há `unsafe-inline` nem
+# `unsafe-eval`. `connect-src` libera só a API; `frame-ancestors 'none'` impede o painel em iframe.
+# HSTS sem `preload`: a lista de preload só aceita o domínio raiz, é difícil de reverter e o
+# domínio ainda não está registrado; decidir no registro de `bairrin.com.br`.
+(cabecalhos_de_seguranca) {
+	header {
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://api.bairrin.com.br; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		-Server
+	}
+}
+
+:8080 {
+	root * /srv
+	encode zstd gzip
+
+	import cabecalhos_de_seguranca
+
+	# Arquivos com hash no nome: cache longo e imutável, só quando o arquivo existe. Asset ausente
+	# responde 404 (nunca o index.html, que seria guardado como imutável no lugar do arquivo).
+	handle /assets/* {
+		@existe file
+		header @existe Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Demais caminhos: fallback de SPA para o index.html, sempre revalidado.
+	# `file_server` sem `browse`: nenhuma listagem de diretório.
+	handle {
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Erros (404 de asset, 405 de método) com os mesmos cabeçalhos e sem cache.
+	handle_errors {
+		import cabecalhos_de_seguranca
+		header Cache-Control "no-store"
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}

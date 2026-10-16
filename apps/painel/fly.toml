@@ -1,0 +1,37 @@
+# App Fly do painel do admin (S9): build estático servido pelo Caddy (apps/painel/Caddyfile).
+# O contexto do build é a raiz do monorepo; rode o deploy a partir dela:
+#   fly deploy -c apps/painel/fly.toml
+# Domínio: painel.bairrin.com.br, depois do registro de bairrin.com.br
+# (`fly certs add painel.bairrin.com.br -c apps/painel/fly.toml`).
+
+app = "bairrin-painel"
+primary_region = "gru"
+
+[build]
+  # Caminho relativo a este arquivo (o flyctl resolve a partir da pasta do fly.toml).
+  dockerfile = "Dockerfile"
+
+[http_service]
+  # O Caddy escuta HTTP nesta porta; o TLS termina no proxy do Fly.
+  internal_port = 8080
+  # HTTP -> HTTPS no proxy. O HSTS vem do Caddy.
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "5s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

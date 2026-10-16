@@ -1,0 +1,2 @@
+- [Como rodar testes](como-rodar-testes.md) — comandos isolados, sondas com decorators, cópia limpa, armadilhas do `pnpm -r`
+- [Estado do 01a após rodada 2](verificador-migracoes-e-logs-lacunas.md) — Q1-Q4 corrigidos; lacunas baixas restantes de logs, verificador, depcruise

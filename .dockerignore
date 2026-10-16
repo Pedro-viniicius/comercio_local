@@ -1,0 +1,37 @@
+# Contexto de build das imagens da API (apps/api/Dockerfile) e do painel (apps/painel/Dockerfile),
+# os dois construídos a partir da raiz do monorepo. Os Dockerfiles copiam só o que precisam;
+# esta lista é a segunda barreira: nada daqui chega ao daemon do Docker.
+
+# Variáveis de ambiente e segredos locais: nunca entram em imagem (só os modelos .env.example).
+**/.env*
+!**/.env.example
+
+# Dependências e saídas de build da máquina de quem constrói: a imagem instala e compila do zero.
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/web-build
+**/*.tsbuildinfo
+**/.vitest
+**/.expo
+apps/*/android
+apps/*/ios
+apps/api/src/compartilhado/infra/gerado
+
+# Chaves e certificados de assinatura (a CA pública do Supabase, .crt, continua no contexto).
+**/*.jks
+**/*.keystore
+**/*.p8
+**/*.p12
+**/*.key
+**/*.pem
+**/*.mobileprovision
+
+# Repositório, documentação, CI e configuração local de ferramentas.
+.git
+.github
+docs
+.claude
+**/*.log
+**/.DS_Store

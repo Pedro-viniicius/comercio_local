@@ -1,0 +1,19 @@
+---
+name: heuristicas-de-revisao
+description: Padrões de problema recorrentes no Bairrin (docs atrasadas, esquema de cliente intolerante, fronteiras do compartilhado, DI de porta/adaptador, contagem de testes com designer em paralelo)
+metadata:
+  type: project
+---
+
+Padrões vistos na revisão do 01a (2026-10-16); confira no código antes de repetir:
+
+- **Docs atrás do código em plano de várias etapas:** (fechado no 01a em 2026-10-16 após grep geral) README e checklist ficam com "em preparação"/"ainda sem arquivo" escritos em etapa anterior. Na rodada 2 do 01a o README raiz continuou dizendo que CI, Dockerfile e fly.toml da API não existiam, mesmo com a correção de R3: a correção mexeu só nas linhas citadas. Ao conferir correção de doc, faça grep dos marcadores em todos os READMEs, não só nas linhas do achado. Compare listas de segredos/variáveis com `fly.toml` e `.env.example`.
+- **Esquema lido pelo cliente com `z.enum`:** quebra app antigo diante de API nova. Convenção adotada: esquema de produção restrito (`campoComErroSchema`) e esquema de leitura tolerante (`campoDoProblemaSchema`, `codigo: z.string()`). Exija o mesmo par em contratos novos.
+- **Fronteiras (`.dependency-cruiser.cjs`):** desde a rodada 2 do 01a as portas do núcleo ficam em `compartilhado/{transacao,tempo,eventos/publicador,auditoria,email,titular}` e os adaptadores em `compartilhado/infra` ou `*.adaptador.ts`. Pendência aceita: `eventos/{assinantes,relay,limpeza.tarefa}.ts` e `titular/anonimizador-de-titular.ts` ainda importam Nest/Prisma fora de infra, e nada barra a aplicação de importar `@prisma/*` do npm. Em plano novo, confira se a aplicação de um módulo importa esses arquivos.
+- **DI de porta abstrata:** adaptadores que precisam do `cliente()` injetam `UnidadeDeTrabalhoPrisma`; a porta `UnidadeDeTrabalho` tem de ser `useExisting` (mesma instância e mesmo AsyncLocalStorage). Um `useClass` separado quebraria a transação sem falhar no typecheck.
+- **Redator de log usa `ehChaveProtegida`:** `nome`, `codigo`, `hash` etc. contam como palavra inteira depois de quebrar camelCase, então `codigoDoErro`, `nomeDoEvento` e `codigoDeVerificacao` também são redigidos. Nome seguro não pode conter essas palavras (ex.: `erroSql`, `evento`, `assinante`). Ao conferir doc que sugere nome de chave, teste contra `palavrasDaChave`.
+- **Linha de base de testes:** o designer edita `packages/tokens` e `apps/painel` em paralelo; diferença de contagem nesses pacotes não é regressão do dev sem conferir a data dos arquivos.
+- **Fly `trust proxy`:** valor de saltos não verificado num Fly real; `Fly-Client-IP` é a alternativa robusta. Levar ao `seguranca`.
+
+**Why:** cada item gerou achado ou pergunta nas rodadas do 01a.
+**How to apply:** usar como checklist extra nas próximas revisões (01b em diante). Ver [[feedback-revisoes-grandes]].

@@ -1,0 +1,2 @@
+- [Base de design Bairrin](project_design_base.md) — marca aprovada, onde estão specs/tokens/wireframes, pastas proibidas, padrões recorrentes
+- [Lições de nomes de marca](feedback_nomes.md) — evitar palavra comum; junção inventada; medir títulos de loja (30 car.)

@@ -1,0 +1,18 @@
+SUBSTITUA ESTE ARQUIVO PELO CERTIFICADO DA CA DO SUPABASE ANTES DO PRIMEIRO DEPLOY.
+
+Este texto NAO e um certificado. Ele ocupa o lugar da CA raiz do Supabase, que a API, o worker
+e o release_command usam para conectar com sslmode=verify-full (S21 da revisao de seguranca de
+2026-10-16). Enquanto ele estiver aqui, em producao (NODE_ENV=production):
+- a API e o worker nao sobem (verificarAmbienteDeProducao, apps/api/src/compartilhado/config/ambiente.ts);
+- o release_command falha antes de migrar (urlDeMigracao, apps/api/prisma.config.ts).
+Fora de producao (dev, testes, CI) o arquivo nao e lido.
+
+Como obter: no painel do Supabase, abra o projeto de producao, va em Database Settings e baixe o
+certificado da secao SSL Configuration ("Download certificate"). O certificado da CA e publico
+(nao e segredo) e pode ser versionado. Substitua todo o conteudo deste arquivo pelo arquivo
+baixado, sem alterar o nome, e confira:
+  openssl x509 -in infra/certificados/supabase-ca.crt -noout -subject -issuer -enddate
+
+A imagem da API copia este arquivo para /app/certificados/supabase-ca.crt. As URLs do banco nos
+segredos do Fly terminam com:
+  ?sslmode=verify-full&sslrootcert=/app/certificados/supabase-ca.crt
