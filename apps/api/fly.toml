@@ -10,6 +10,8 @@
 # As duas URLs do banco (Supabase, sa-east-1) terminam com
 #   ?sslmode=verify-full&sslrootcert=/app/certificados/supabase-ca.crt
 # e a API, o worker e o release_command recusam outra forma em produção (S21).
+# SENTRY_RELEASE (opcional) vai no próprio deploy, com `-e`, nunca aqui nem nos segredos:
+#   ver docs/operacao/checklist-deploy.md, seção 11.
 
 app = "bairrin-api"
 primary_region = "gru"

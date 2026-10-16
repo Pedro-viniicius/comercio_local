@@ -43,6 +43,12 @@ const origem = z
     error: 'Cada origem deve ser http(s)://host[:porta], sem caminho e sem "*".',
   });
 
+/**
+ * Nome de release aceito pelo Sentry: até 200 caracteres, sem barra, espaço nem
+ * quebra de linha, e diferente de ".", ".." e "latest".
+ */
+const releaseDoSentry = /^(?!\.{1,2}$)(?!latest$)[A-Za-z0-9._+@-]{1,200}$/;
+
 const esquemaDoAmbiente = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']),
@@ -68,6 +74,28 @@ const esquemaDoAmbiente = z
       .optional()
       .transform((valor) => (valor && valor.trim().length > 0 ? valor.trim() : undefined))
       .pipe(z.url().optional()),
+    // Release dos eventos no Sentry (por exemplo, o SHA do commit da imagem).
+    // Vazio: sem release. Só vale o que for configurado aqui: o SDK não deduz a
+    // release de `GITHUB_SHA` nem de variáveis de outros CIs.
+    SENTRY_RELEASE: z
+      .string()
+      .optional()
+      .transform((valor) => (valor && valor.trim().length > 0 ? valor.trim() : undefined))
+      .pipe(
+        z
+          .string()
+          .regex(releaseDoSentry, {
+            error: 'Use até 200 letras, números ou . _ + @ -, e não use ".", ".." nem "latest".',
+          })
+          .optional(),
+      ),
+    // Lida pelo SDK do Sentry direto do ambiente: ligaria o tracing, que a API
+    // não usa (S61). Só existe aqui para ser recusada em produção; vazia, o SDK
+    // a ignora.
+    SENTRY_TRACES_SAMPLE_RATE: z
+      .string()
+      .optional()
+      .transform((valor) => (valor && valor.trim().length > 0 ? valor : undefined)),
     LOG_NIVEL: z.enum(NIVEIS_DE_LOG),
   })
   .superRefine((ambiente, contexto) => {
@@ -89,6 +117,13 @@ const esquemaDoAmbiente = z
           message: 'Valor de exemplo do .env.example não pode ser usado em produção.',
         });
       }
+    }
+    if (ambiente.SENTRY_TRACES_SAMPLE_RATE !== undefined) {
+      contexto.addIssue({
+        code: 'custom',
+        path: ['SENTRY_TRACES_SAMPLE_RATE'],
+        message: 'Em produção, não defina: o Sentry da API não usa tracing.',
+      });
     }
     for (const endereco of ambiente.CORS_ORIGENS) {
       if (!endereco.startsWith('https://')) {

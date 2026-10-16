@@ -40,6 +40,33 @@ describe('carregarAmbiente', () => {
     expect(ambiente.PORTA).toBe(3000);
     expect(ambiente.CORS_ORIGENS).toEqual(['http://localhost:5173', 'http://127.0.0.1:5173']);
     expect(ambiente.SENTRY_DSN).toBeUndefined();
+    expect(ambiente.SENTRY_RELEASE).toBeUndefined();
+  });
+
+  it('SENTRY_RELEASE: vazio ou só espaço vira sem release; valor válido passa aparado', () => {
+    expect(carregarAmbiente(variaveis({ SENTRY_RELEASE: '' })).SENTRY_RELEASE).toBeUndefined();
+    expect(carregarAmbiente(variaveis({ SENTRY_RELEASE: '  ' })).SENTRY_RELEASE).toBeUndefined();
+    expect(
+      carregarAmbiente(variaveis({ SENTRY_RELEASE: ' api@d52331f0+build.1_a-b ' })).SENTRY_RELEASE,
+    ).toBe('api@d52331f0+build.1_a-b');
+    expect(
+      carregarAmbiente(variaveis({ SENTRY_RELEASE: 'a'.repeat(200) })).SENTRY_RELEASE,
+    ).toHaveLength(200);
+  });
+
+  it.each([
+    '.',
+    '..',
+    'latest',
+    'com espaço',
+    'com/barra',
+    'com\\barra',
+    'linha\nnova',
+    'a'.repeat(201),
+  ])('SENTRY_RELEASE: recusa %j, nome que o Sentry não aceita', (valor) => {
+    const problemas = problemasDe(variaveis({ SENTRY_RELEASE: valor }));
+    expect(problemas).toHaveLength(1);
+    expect(problemas[0]).toMatch(/^SENTRY_RELEASE: /);
   });
 
   it('aceita as chaves de exemplo do .env.example fora de produção', () => {
@@ -103,6 +130,23 @@ describe('carregarAmbiente', () => {
       'JWT_SEGREDO: Valor de exemplo do .env.example não pode ser usado em produção.',
       'CORS_ORIGENS: Em produção, toda origem deve usar https://.',
     ]);
+  });
+
+  it('em produção, recusa SENTRY_TRACES_SAMPLE_RATE, que ligaria o tracing do Sentry (S61)', () => {
+    const producao = {
+      NODE_ENV: 'production',
+      CORS_ORIGENS: 'https://painel.bairrin.com.br',
+    };
+    expect(problemasDe(variaveis({ ...producao, SENTRY_TRACES_SAMPLE_RATE: '0.2' }))).toEqual([
+      'SENTRY_TRACES_SAMPLE_RATE: Em produção, não defina: o Sentry da API não usa tracing.',
+    ]);
+    expect(
+      carregarAmbiente(variaveis({ ...producao, SENTRY_TRACES_SAMPLE_RATE: ' ' }))
+        .SENTRY_TRACES_SAMPLE_RATE,
+    ).toBeUndefined();
+    expect(
+      carregarAmbiente(variaveis({ SENTRY_TRACES_SAMPLE_RATE: '1' })).SENTRY_TRACES_SAMPLE_RATE,
+    ).toBe('1');
   });
 
   it('a mensagem do erro não contém nenhum valor recebido', () => {

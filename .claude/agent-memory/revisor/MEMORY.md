@@ -1,2 +1,2 @@
 - [Revisões grandes: entregar cedo](feedback_revisoes_grandes.md) — priorizar pontos do lead e entregar antes de detalhe; tentativas longas caíram
-- [Heurísticas de revisão do Bairrin](heuristicas-de-revisao.md) — docs atrasadas, esquema tolerante, fronteiras, DI useExisting, logger, verificador SQL, catálogo do release
+- [Heurísticas de revisão do Bairrin](heuristicas-de-revisao.md) — docs atrasadas, esquema tolerante, fronteiras, DI useExisting, logger, verificador SQL, catálogo do release, sessões do Sentry

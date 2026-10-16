@@ -16,4 +16,7 @@ Arquitetura aprovada pelo dono em 2026-10-16 (`docs/produto/decisoes.md`); plano
 - Pendência obrigatória antes do 1º deploy de produção: *poison pill* do relay da outbox (precisa de coluna ou tabela nova). Registrada no 01b (P6); quem decide é o dono, o desenho é do arquiteto.
 - `SCHEMAS_FECHADOS` virou piso; a checagem do release cobre sozinha os schemas do papel de migração e os com USAGE de `bairrin_app` (01b, etapa 0a). **Why:** não depender de lembrar de editar a lista a cada plano.
 
-Relacionado: [[reference-fontes-gateways]]
+- Publicação nas lojas (plano `publicacao-nas-lojas.md`, 2026-10-16, revisado com S37-S45 do `seguranca`, aguarda aprovação): EAS Build e Submit no Free, disparados pelo GitHub Actions por tag `<app>/vX.Y.Z`; só trilhas de teste; promoção manual com conferência do `gitCommitHash`; sem EAS Update; só `EXPO_TOKEN` (robô ou conta Expo do CI, nunca pessoal). **Why:** nada pago, sem Mac, Free privado sem environments nem rulesets (checagem de main/tag é só guarda contra acidente; quem tem escrita publica nas trilhas de teste, risco da P3). **How to apply:** app Sentry sem `setUser` e sem sessões (como Q12 da API); dado novo nos apps entra em `docs/operacao/privacidade-nas-lojas.md`; P8-P10 (GPS efêmero, sem histórico de busca, métricas só agregadas) aguardam o dono.
+- Numeração global de CAs: o maior era CA-110 até esse plano, que usa CA-111 a CA-121. **How to apply:** o próximo plano começa no CA-122 (confira com `rg`).
+
+Relacionado: [[reference-fontes-gateways]], [[reference-fontes-lojas]]

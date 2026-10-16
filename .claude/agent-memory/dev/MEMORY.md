@@ -11,4 +11,4 @@
 - [dependency-cruiser e fronteiras](depcruise-fronteiras.md) — exclude derruba npm, caminhos ../ nas fixtures, CLI no teste
 - [pg-boss, outbox e e-mail](pgboss-eventos-email.md) — pg-boss sem CREATE (CLI + GRANTs), output do job guarda erro, nodemailer 10, Mailpit, lint
 - [Docs: comandos verificados](docs-comandos-verificados.md) — Prisma CLI a partir de apps/api, cópia limpa real, node --run sem env-file, Prettier, EAS pago
-- [Deploy, TLS e Sentry](deploy-imagem-tls-sentry.md) — Sentry 11 sem sendDefaultPii, Prisma rebaixa verify-full, pnpm deploy sem CLI, actionlint via Docker
+- [Deploy, TLS e Sentry](deploy-imagem-tls-sentry.md) — Sentry 11 sem sendDefaultPii, sessões/release do CI, env lido pelo SDK (Spotlight/debug/traces), Prisma verify-full, actionlint

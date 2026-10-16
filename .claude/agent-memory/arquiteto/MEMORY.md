@@ -1,2 +1,3 @@
 - [Arquitetura do MVP](project_arquitetura_mvp.md) — stack aprovada, padrões de segurança, pendência do poison pill, armadilha do filtro de integração
 - [Fontes de gateways](reference_fontes_gateways.md) — URLs oficiais por critério e o que não foi confirmado
+- [Fontes de lojas e CI](reference_fontes_lojas.md) — preços e regras de EAS, Actions, Apple e Play, conferidos em 2026-10-16

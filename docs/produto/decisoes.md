@@ -2,6 +2,20 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-16 — Decisão do dono: publicação automática nas lojas aprovada
+- Contexto: o dono pediu automatizar o envio dos apps para a App Store e a Google Play. O `arquiteto` fez o plano `docs/produto/planos/publicacao-nas-lojas.md` (CA-111 a CA-121), revisado pelo `seguranca` em duas rodadas.
+- Decisão: plano aprovado com todas as recomendações.
+  - Automação: EAS Build e EAS Submit no Expo Free, disparados pelo GitHub Actions; envio só às trilhas de teste; promoção para produção manual, pelo dono.
+  - P1: contas de organização nas lojas depois do CNPJ e do D-U-N-S.
+  - P2: sem EAS Update até haver o plano pago do Expo.
+  - P3: o dono aceita o risco do `EXPO_TOKEN` como secret do repositório, que no GitHub Free não tem environments, com as condições da P3 do plano. Reabre o aceite: colaborador novo; token pessoal ou robô com papel acima de Developer; a conta de serviço da Play ganhar produção, gestão de trilhas ou papel IAM; outro secret no repositório; repositório público; chave da Apple como App Manager.
+  - P4: a política de privacidade é publicada quando `bairrin.com.br` for registrado.
+  - P8: a localização do GPS é efêmera; só o endereço salvo pelo usuário é guardado.
+  - P9: sem histórico de busca, só contadores agregados.
+  - P10: no MVP, só as métricas que o servidor já vê, agregadas e sem a conta; sem SDK de analytics nos apps.
+- Pendências que só o dono resolve: pagar a Apple (US$ 99 por ano) e a Play (US$ 25, uma vez), abrir o CNPJ, pedir o D-U-N-S e escolher onde hospedar a API. A implementação começa depois das etapas 8 e 9 do 01a (2026-10-19) e da etapa 1 do 01b, que mexe nos mesmos arquivos.
+- O dono respondeu "APROVADO" à pergunta de aprovação, e o lead registrou isso como aprovação.
+
 ## 2026-10-16 — Decisão do dono: plano 01b atualizado aprovado
 - Contexto: o `arquiteto` acrescentou ao `docs/produto/planos/01b-identidade.md` o grupo 0 (etapas 0a e 0b, com as pendências do 01a). Também corrigiu a etapa 2 (já feita no 01a), a etapa 16 (a guarda de autenticação no núcleo passa a usar uma porta) e os comandos de integração.
 - Decisão: plano aprovado, com a premissa P5. O verificador reprova política sem `TO` ou aberta a `PUBLIC`, `anon`, `authenticated` ou `service_role`; `TO bairrin_app USING (true)` continua aceito. O dono respondeu "-continue" à pergunta de aprovação, e o lead registrou isso como aprovação.
