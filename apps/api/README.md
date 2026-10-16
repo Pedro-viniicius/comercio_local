@@ -67,10 +67,13 @@ Regras do SQL (verificadas por `pnpm migracoes:verificar` na raiz):
 
 - Começa com um comentário `-- reversao:` que diz como desfazer.
 - Toda `CREATE TABLE` (e todo `SELECT ... INTO`, que também cria tabela) tem `ENABLE ROW LEVEL SECURITY` na mesma migração, com política só para `bairrin_app`, e o `GRANT` explícito de DML.
-- Nada em `public`, inclusive extensão: `CREATE EXTENSION` sempre com `WITH SCHEMA <schema>`.
+- Nada em `public`, inclusive extensão: `CREATE EXTENSION` sempre com `WITH SCHEMA <schema>`, e o schema é um do Bairrin, não o `extensions` do Supabase. Lá o `anon` tem USAGE; se o `bairrin_app` também recebesse USAGE ali para usar a extensão, a checagem de schemas fechados do release passaria a incluir `extensions` e pararia o deploy.
 - `DROP`, `RENAME`, `ALTER COLUMN ... TYPE`, `TRUNCATE` e `DELETE FROM` só em pasta `<timestamp>_<nome>_destrutiva`, separada da criação e começando por um bloco `DO $$ ... RAISE EXCEPTION ... $$` que aborta se houver linhas.
 - Nunca, em pasta nenhuma: `DISABLE` ou `NO FORCE ROW LEVEL SECURITY`; `DISABLE TRIGGER`, `ENABLE REPLICA TRIGGER` ou `session_replication_role`; `GRANT` para `PUBLIC`, `anon`, `authenticated` ou `service_role`; `GRANT` de `UPDATE`, `DELETE`, `TRUNCATE` ou `ALL` em tabela só de acréscimo (`compartilhado.auditoria`); função `SECURITY DEFINER` sem `SET search_path` no mesmo comando.
-- SQL dinâmico (`EXECUTE '...'`) passa pelas mesmas regras; tabela criada ali com nome montado (`format('%I')`, `||`) é recusada.
+- Nunca, em pasta nenhuma, também: `ALTER DEFAULT PRIVILEGES ... GRANT` (o `REVOKE` passa); `CREATE POLICY` sem `TO` ou com `TO` para `PUBLIC`, `anon`, `authenticated` ou `service_role` (`TO bairrin_app USING (true)` passa); `CREATE` ou `ALTER` de `ROLE`, `USER` ou `GROUP`, `SUPERUSER`, `BYPASSRLS`, `CREATEROLE` e `GRANT <papel> TO` sem `ON`; `SET ROLE`, `SET SESSION AUTHORIZATION` (também `SET "role" TO ...` e `SET role = ...` como opção de função ou de `ALTER DATABASE`), `set_config('role', ...)` e `row_security` (no código e em texto executado; na mensagem de `RAISE` e na descrição de `COMMENT ... IS` passa); `COPY ... PROGRAM`; `OWNER TO`, `CREATE SCHEMA ... AUTHORIZATION` e `REASSIGN OWNED BY ... TO` para papel que não seja `bairrin_migracao` nem `CURRENT_USER`. `UPDATE ... SET role = ...` é coluna e passa.
+- Nunca, em pasta nenhuma, também: `GRANT CREATE` (ou `ALL`) em `SCHEMA` ou `DATABASE` para papel que não seja `bairrin_migracao`; `GRANT ... WITH GRANT OPTION`; `ALTER POLICY ... TO` para os mesmos papéis recusados no `CREATE POLICY`, que também não aceita `postgres`, `authenticator`, `pgbouncer`, `dashboard_user`, `supabase_*` nem `pg_*`; `CREATE RULE`.
+- Corpo `$tag$` só para código: logo depois de `DO` (ou `DO LANGUAGE <nome>`) ou de `AS` (corpo de função ou procedimento), no topo do arquivo. Texto entre `$tag$` (`SELECT $q$...$q$`, `COMMENT ... IS $q$...$q$`) e `$tag$` dentro de outro corpo são recusados: o Postgres lê esse trecho como texto, e uma aspa ou um `--` ali esconderiam o comando seguinte do verificador. Pelo mesmo motivo, texto ou comentário `/* */` não pode passar do fim do corpo (o corpo termina no primeiro delimitador igual ao que o abriu).
+- SQL dinâmico: `EXECUTE` só de texto literal único (`'...'` ou `E'...'`) ou de `format('<literal>', ...)` com `%I`, `%L` e `%%` no modelo (nunca `%s`), nunca com `||` nem de variável. O texto passa pelas mesmas regras, até 4 níveis de texto dentro de texto (mais que isso reprova); tabela criada ali com nome montado (`format('%I')`) é recusada. O `EXECUTE FUNCTION` de trigger, o privilégio `GRANT EXECUTE` e uma coluna chamada `execute` fora de corpo de função não contam.
 
 **Client do Prisma.** `pnpm install` roda `prisma generate` (`postinstall`) e gera em `src/compartilhado/infra/gerado/`, pasta fora do git. Se mudar o `schema.prisma`, rode `pnpm install` de novo ou `prisma generate` pela mesma CLI. A aplicação conecta pelo `PrismaService`, com o driver adapter `@prisma/adapter-pg` e o papel `bairrin_app`.
 
@@ -95,7 +98,7 @@ Os testes de integração fazem os dois passos no `globalSetup`. A aplicação s
 ```
 main.ts, worker.ts          entradas HTTP e worker
 app.module.ts, worker.module.ts
-cli/migrar-pg-boss.ts       passo de migração do pg-boss e checagem de schemas fechados (S26)
+cli/migrar-pg-boss.ts       passo de migração do pg-boss, checagem de schemas fechados (S26) e do catálogo (S33)
 compartilhado/
   config/        ambiente validado com zod
   http/          configurarAplicacao, filtro de erros (Problem Details), pipe de validação, id da requisição
@@ -106,9 +109,9 @@ compartilhado/
   eventos/       porta PublicadorDeEventos, relay, assinantes, tarefa de limpeza
   auditoria/     porta RepositorioDeAuditoria
   titular/       AnonimizadorDeTitular e a regra de dado pessoal
-  email/         porta EnviadorDeEmail e falso em memória
+  email/         porta EnviadorDeEmail (o falso em memória fica em test/fakes/compartilhado/)
   infra/         adaptadores: PrismaService, UnidadeDeTrabalhoPrisma, PublicadorDeEventosNaOutbox,
-                 RepositorioDeAuditoriaPrisma, SMTP, pg-boss, checagem de schemas fechados
+                 RepositorioDeAuditoriaPrisma, SMTP, pg-boss, checagens de schemas fechados e do catálogo
 modulos/<contexto>/{dominio,aplicacao,infra,http}   (futuro, a partir do plano 01b)
 ```
 

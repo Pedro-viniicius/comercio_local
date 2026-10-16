@@ -27,6 +27,13 @@ const TRECHOS_SENSIVEIS = [
   'cnpj',
 ] as const;
 
+/**
+ * Chaves de texto livre, comparadas inteiras (depois da mesma normalização):
+ * a mensagem de um erro costuma ir para elas (`{ message: erro.message }`), e
+ * o redator não sabe o que há no texto. Inteiras para não pegar `messageId`.
+ */
+const CHAVES_DE_TEXTO_LIVRE = ['message', 'msg'] as const;
+
 /** Profundidade máxima percorrida; abaixo dela o valor é descartado. */
 const PROFUNDIDADE_MAXIMA = 8;
 const VALOR_PROFUNDO = '[PROFUNDO]';
@@ -39,6 +46,7 @@ const VALOR_BINARIO = '[BINARIO]';
 export function ehChaveSensivel(chave: string): boolean {
   if (ehChaveProtegida(chave)) return true;
   const normalizada = chave.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if ((CHAVES_DE_TEXTO_LIVRE as readonly string[]).includes(normalizada)) return true;
   return TRECHOS_SENSIVEIS.some((trecho) => normalizada.includes(trecho));
 }
 
@@ -49,10 +57,18 @@ export interface ResumoDeErro {
   pilha?: string;
 }
 
-/** Linhas de pilha (`    at ...`), sem a primeira, que repete a mensagem. */
-function quadrosDaPilha(pilha: unknown): string | undefined {
+/**
+ * Linhas de pilha (`    at ...`) depois da mensagem. O cabeçalho da pilha
+ * (`Tipo: mensagem`) repete a mensagem, que pode ter várias linhas, inclusive
+ * uma parecida com quadro (`    at fulano@...`, Q9): só conta o que vem depois
+ * da mensagem. Pilha trocada à mão, sem a mensagem, é lida inteira.
+ */
+function quadrosDaPilha(pilha: unknown, mensagem: unknown): string | undefined {
   if (typeof pilha !== 'string') return undefined;
-  const quadros = pilha.split('\n').filter((linha) => /^\s+at\s/.test(linha));
+  const inicio = typeof mensagem === 'string' && mensagem !== '' ? pilha.indexOf(mensagem) : -1;
+  const depoisDaMensagem =
+    inicio === -1 ? pilha : pilha.slice(inicio + (mensagem as string).length);
+  const quadros = depoisDaMensagem.split('\n').filter((linha) => /^\s+at\s/.test(linha));
   return quadros.length > 0 ? quadros.join('\n') : undefined;
 }
 
@@ -65,7 +81,7 @@ function quadrosDaPilha(pilha: unknown): string | undefined {
 export function resumirErro(erro: unknown): ResumoDeErro {
   if (!(erro instanceof Error)) return { tipo: typeof erro };
   const codigo: unknown = (erro as Error & { code?: unknown }).code;
-  const pilha = quadrosDaPilha(erro.stack);
+  const pilha = quadrosDaPilha(erro.stack, erro.message);
   return {
     tipo: erro.name || erro.constructor.name,
     ...(typeof codigo === 'string' || typeof codigo === 'number' ? { codigo } : {}),

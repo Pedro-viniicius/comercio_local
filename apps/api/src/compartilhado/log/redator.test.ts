@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ehChaveSensivel, redigir, urlSemQuery, VALOR_REDIGIDO } from './redator.ts';
+import { ehChaveSensivel, redigir, resumirErro, urlSemQuery, VALOR_REDIGIDO } from './redator.ts';
 
 describe('ehChaveSensivel', () => {
   it.each([
@@ -50,16 +50,29 @@ describe('ehChaveSensivel', () => {
     'E.Mail',
     'CnPj',
     'numeroCpf',
+    // Texto livre: a mensagem de um erro costuma vir por aqui (R12, Q8).
+    'message',
+    'Message',
+    'msg',
+    'MSG',
   ])('%s é sensível', (chave) => {
     expect(ehChaveSensivel(chave)).toBe(true);
   });
 
-  it.each(['status', 'idRequisicao', 'url', 'metodo', 'tipo', 'lojaId', 'responseTime', 'pilha'])(
-    '%s não é sensível',
-    (chave) => {
-      expect(ehChaveSensivel(chave)).toBe(false);
-    },
-  );
+  it.each([
+    'status',
+    'idRequisicao',
+    'url',
+    'metodo',
+    'tipo',
+    'lojaId',
+    'responseTime',
+    'pilha',
+    'messageId',
+    'mensagens',
+  ])('%s não é sensível', (chave) => {
+    expect(ehChaveSensivel(chave)).toBe(false);
+  });
 });
 
 describe('redigir', () => {
@@ -206,6 +219,33 @@ describe('redigir', () => {
       a: { valor: 1 },
       b: { valor: 1 },
     });
+  });
+});
+
+describe('resumirErro: quadros da pilha (Q9)', () => {
+  it('descarta as linhas da mensagem, mesmo as parecidas com quadro', () => {
+    const erro = new Error('falha\n    at fulano@exemplo.com (falso.ts:1:1)\n  at outro');
+    const { pilha } = resumirErro(erro);
+    expect(pilha).toBeDefined();
+    expect(pilha).not.toContain('fulano@exemplo.com');
+    expect(pilha).not.toContain('outro');
+    expect(pilha?.split('\n').every((linha) => /^\s+at\s/.test(linha))).toBe(true);
+  });
+
+  it('com pilha trocada à mão, sem a mensagem, fica só com os quadros', () => {
+    const erro = new Error('falha');
+    erro.stack = 'Outro: cabeçalho\n    at a (a.ts:1:1)\n    at b (b.ts:2:2)';
+    expect(resumirErro(erro).pilha).toBe('    at a (a.ts:1:1)\n    at b (b.ts:2:2)');
+  });
+
+  it('com mensagem vazia ou que não é texto, segue com os quadros', () => {
+    const vazia = new Error('');
+    vazia.stack = 'Error\n    at a (a.ts:1:1)';
+    expect(resumirErro(vazia).pilha).toBe('    at a (a.ts:1:1)');
+    const estranha = new Error('x');
+    (estranha as { message: unknown }).message = { email: 'fulano@exemplo.com' };
+    estranha.stack = 'Error: [object Object]\n    at a (a.ts:1:1)';
+    expect(resumirErro(estranha).pilha).toBe('    at a (a.ts:1:1)');
   });
 });
 

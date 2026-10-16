@@ -1,6 +1,6 @@
 ---
 name: heuristicas-de-revisao
-description: Padrões de problema recorrentes no Bairrin (docs atrasadas, esquema de cliente intolerante, fronteiras do compartilhado, DI de porta/adaptador, contagem de testes com designer em paralelo)
+description: Padrões de problema recorrentes no Bairrin (docs atrasadas, esquema tolerante, fronteiras, DI de porta, redator e hook do logger, verificador de migrações e checagem de catálogo)
 metadata:
   type: project
 ---
@@ -14,6 +14,9 @@ Padrões vistos na revisão do 01a (2026-10-16); confira no código antes de rep
 - **Redator de log usa `ehChaveProtegida`:** `nome`, `codigo`, `hash` etc. contam como palavra inteira depois de quebrar camelCase, então `codigoDoErro`, `nomeDoEvento` e `codigoDeVerificacao` também são redigidos. Nome seguro não pode conter essas palavras (ex.: `erroSql`, `evento`, `assinante`). Ao conferir doc que sugere nome de chave, teste contra `palavrasDaChave`.
 - **Linha de base de testes:** o designer edita `packages/tokens` e `apps/painel` em paralelo; diferença de contagem nesses pacotes não é regressão do dev sem conferir a data dos arquivos.
 - **Fly `trust proxy`:** valor de saltos não verificado num Fly real; `Fly-Client-IP` é a alternativa robusta. Levar ao `seguranca`.
+- **Logger (desde o 01b, grupo 0):** `hooks.logMethod` fixa o texto (`sem mensagem`), descarta interpolação e tira a chave própria `msg` do objeto (R12, fechado na rodada 2). Restam: `child({ msg })` ainda gera dois `"msg"` (valor redigido, sem vazamento); a chave `mensagem` não é redigida; o lint `no-restricted-syntax` (S36) só pega template string e `.message` no argumento direto ou numa propriedade de primeiro nível. Nest 12 loga exceção como `logger.error(erro)` (chega como `(obj, undefined)`). Sondar o logger: `node --experimental-transform-types` num script do scratchpad rodado de `apps/api`. ESLint com tipos não aceita arquivo novo no `--stdin`: use `--stdin-filename apps/api/src/main.ts`.
+- **Verificador de migrações:** desde a rodada 2 do grupo 0 do 01b, `SET "role"` e `format` (só `%I`/`%L`/`%%`) estão cobertos e `$tag$` só abre corpo depois de `DO`/`AS` no topo (como texto ou aninhado reprova). Brechas declaradas e abertas: `U&'...'`, `E'\x..'` em SQL dinâmico, `%I` com palavra-chave, `ALTER SYSTEM`, corpo de linguagem não SQL. `analisarTrecho` tem ~25 laços iguais (R17): cobrar a refatoração em tabela antes da próxima regra. Sonde com um script que importa `analisarMigracao`.
+- **Checagem de catálogo no release (S33, `schemas-fechados.ts`):** é a rede de segurança do verificador (dono/CREATE da app, RLS, políticas, triggers da auditoria, regras, GRANT OPTION, views sem `security_invoker`). Toda regra nova do verificador deveria ter, se possível, o espelho no catálogo. Supabase (`extensions`, `pg_stat_statements`) não verificado.
 
-**Why:** cada item gerou achado ou pergunta nas rodadas do 01a.
+**Why:** cada item gerou achado ou pergunta nas rodadas do 01a e do grupo 0 do 01b.
 **How to apply:** usar como checklist extra nas próximas revisões (01b em diante). Ver [[feedback-revisoes-grandes]].

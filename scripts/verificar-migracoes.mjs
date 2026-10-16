@@ -16,17 +16,47 @@
 // - `GRANT` para `PUBLIC`, `anon`, `authenticated` ou `service_role` (papéis do Supabase);
 // - `GRANT` de `UPDATE`, `DELETE`, `TRUNCATE` ou `ALL` em tabela somente-acréscimo
 //   (`compartilhado.auditoria`), inclusive por `ON ALL TABLES IN SCHEMA compartilhado`;
-// - função ou procedimento `SECURITY DEFINER` sem `SET search_path` no mesmo comando.
+// - função ou procedimento `SECURITY DEFINER` sem `SET search_path` no mesmo comando;
+// - pendências do 01a (Q6 e Seg-2, `docs/produto/decisoes.md`), em qualquer pasta:
+//   - `EXECUTE` do PL/pgSQL com `||` no argumento, ou com argumento que não seja um texto
+//     literal único (`'...'`, `E'...'`) nem `format(<literal único>, ...)`.
+//     Não contam o `EXECUTE FUNCTION|PROCEDURE` de trigger nem o privilégio `EXECUTE`;
+//   - `ALTER DEFAULT PRIVILEGES ... GRANT` (o `REVOKE` passa);
+//   - `CREATE POLICY` sem `TO`, ou com `TO` para `PUBLIC`, `anon`, `authenticated` ou
+//     `service_role`. `TO bairrin_app USING (true)` continua aceito (premissa P5 do 01b);
+//   - `CREATE` ou `ALTER` de `ROLE`, `USER` ou `GROUP`; as palavras `SUPERUSER`, `BYPASSRLS`
+//     e `CREATEROLE`; `GRANT <papel> TO` sem `ON` (pertencimento a papel);
+//   - `SET ROLE`, `SET SESSION AUTHORIZATION` e as formas de parâmetro (`SET "role" TO`,
+//     `SET session_authorization`) no início de um comando, `SET role` como opção de função
+//     ou de `ALTER DATABASE`, `set_config('role', ...)` e `row_security` no código e em texto
+//     executável (`set_config('row_security', ...)`);
+//   - `COPY ... PROGRAM`;
+//   - `OWNER TO` para papel que não seja `bairrin_migracao` nem `CURRENT_USER`.
+// - rodada 1 do 01b, grupo 0 (S33, S34, R14 e R16), em qualquer pasta:
+//   - corpo `$tag$` fora de `DO` ou `AS` no topo (usado como texto) ou dentro de outro corpo
+//     `$tag$`, e texto ou comentário `/* */` que passa do fim do corpo: o Postgres lê esses
+//     trechos como texto, e uma aspa ou um `--` ali esconderia o comando seguinte;
+//   - `CREATE SCHEMA ... AUTHORIZATION` e `REASSIGN OWNED BY ... TO` com a regra do `OWNER TO`;
+//   - `GRANT CREATE` ou `ALL` em `SCHEMA` ou `DATABASE` para papel que não seja
+//     `bairrin_migracao`; `GRANT ... WITH GRANT OPTION`;
+//   - `format` de `EXECUTE` com especificador que não seja `%I`, `%L` (também `%1$I`) ou `%%`;
+//   - `ALTER POLICY ... TO` com a checagem de papéis do `CREATE POLICY`, que também recusa os
+//     papéis administrativos (`postgres`, `authenticator`, `pgbouncer`, `dashboard_user`,
+//     `supabase_*`, `pg_*`);
+//   - `CREATE [OR REPLACE] RULE`;
+//   - SQL dinâmico com mais de 4 níveis (texto dentro de texto) que ainda tenha comando.
 //
 // Comentários e textos entre aspas simples não contam como comando: a nota de reversão com
 // `DROP SCHEMA` passa. `BEFORE TRUNCATE` de trigger e `GRANT TRUNCATE` também, porque
-// TRUNCATE só conta no início de um comando. Texto entre aspas que começa como comando (SQL
-// dinâmico de `EXECUTE`, inclusive aninhado em `format`) é analisado pelas mesmas regras, menos
-// a mensagem de `RAISE` e a descrição de `COMMENT ... IS`, que não são executadas; tabela
-// criada ali com nome montado em tempo de execução (`%I`, `||`) é recusada, porque não dá
-// para conferir schema nem RLS. `ALTER COLUMN ... DROP NOT NULL` e
-// `DROP DEFAULT` não são destrutivos: só relaxam restrições, sem perder dado. `SELECT ...
-// INTO` dentro de corpo `$$ ... $$` (PL/pgSQL) é atribuição a variável, não cria tabela.
+// TRUNCATE só conta no início de um comando. O argumento literal de `EXECUTE` (direto ou modelo
+// de `format`) e todo texto entre aspas que começa como comando (inclusive aninhado) são
+// analisados como SQL dinâmico pelas mesmas regras, menos a mensagem de `RAISE` e a descrição
+// de `COMMENT ... IS`, que não são executadas; tabela criada ali com nome montado em tempo de
+// execução (`%I`, `||`) é recusada, porque não dá para conferir schema nem RLS. `ALTER COLUMN
+// ... DROP NOT NULL` e `DROP DEFAULT` não são destrutivos: só relaxam restrições, sem perder
+// dado. `SELECT ... INTO` dentro de corpo `$$ ... $$` (PL/pgSQL) é atribuição a variável, não
+// cria tabela. `UPDATE ... SET role = ...` é coluna, não troca de papel. `EXECUTE` no topo,
+// fora de corpo de DO ou de função, é comando preparado ou coluna, não o do PL/pgSQL.
 //
 // É uma rede de proteção contra engano, não um parser de SQL: a revisão do SQL continua
 // obrigatória (`prisma migrate dev --create-only`).
@@ -134,15 +164,114 @@ const EXTENSAO = new RegExp(
 );
 
 /**
+ * `EXECUTE` do PL/pgSQL (também `FOR ... IN EXECUTE` e `RETURN QUERY EXECUTE`). Não conta o de
+ * trigger (`EXECUTE FUNCTION|PROCEDURE`) nem o privilégio (`GRANT EXECUTE ON`, `SELECT,
+ * EXECUTE ON`, `EXECUTE, USAGE ON`).
+ */
+const EXECUTE_DINAMICO = /\bEXECUTE\b(?!\s+(?:FUNCTION|PROCEDURE)\b|\s*(?:,|ON\b))/gi;
+
+/** Fim do argumento de `EXECUTE`: `INTO`, `USING` ou o `LOOP` de `FOR ... IN EXECUTE`. */
+const FIM_DO_ARGUMENTO_DE_EXECUTE = /\b(?:INTO|USING|LOOP)\b/i;
+
+/** O texto que começa logo depois disto é o argumento de `EXECUTE` (direto ou em `format`). */
+const ANTES_DE_ARGUMENTO_DE_EXECUTE = /\bEXECUTE\s+(?:format\s*\(\s*)?E?$/i;
+
+/** `ALTER DEFAULT PRIVILEGES [FOR ROLE ...] [IN SCHEMA ...] GRANT`; o `REVOKE` passa. */
+const PRIVILEGIO_PADRAO_CONCEDIDO =
+  /\bALTER\s+DEFAULT\s+PRIVILEGES\b(?:(?!\b(?:GRANT|REVOKE)\b)[^;])*\bGRANT\b/gi;
+
+/** `CREATE POLICY` e `ALTER POLICY` (este pode trocar os papéis com `TO`). */
+const POLITICA = /\b(CREATE|ALTER)\s+POLICY\b[^;]*/gi;
+
+/**
+ * Papéis que nunca recebem política: os sem privilégio e os administrativos do Postgres e do
+ * Supabase (`postgres`, `authenticator`, `pgbouncer`, `dashboard_user`, `supabase_*`, `pg_*`).
+ */
+const PAPEIS_ADMINISTRATIVOS = new Set([
+  'postgres',
+  'authenticator',
+  'pgbouncer',
+  'dashboard_user',
+]);
+function papelSemPolitica(papel) {
+  return (
+    PAPEIS_SEM_PRIVILEGIO.has(papel) ||
+    PAPEIS_ADMINISTRATIVOS.has(papel) ||
+    /^(?:supabase_|pg_)/.test(papel)
+  );
+}
+
+/** `CREATE SCHEMA ... AUTHORIZATION <papel>`: o papel vira dono do schema. */
+const SCHEMA_COM_DONO = /\bCREATE\s+SCHEMA\b[^;]*?\bAUTHORIZATION\s+/gi;
+
+/** `REASSIGN OWNED BY ... TO <papel>`: o papel vira dono de tudo o que era dos outros. */
+const DONO_REATRIBUIDO = /\bREASSIGN\s+OWNED\s+BY\b[^;]*?\bTO\s+/gi;
+
+/** Privilégio que deixa criar objeto (`CREATE` ou `ALL`) em schema ou banco. */
+const PRIVILEGIO_DE_CRIAR = /\b(?:CREATE|ALL)\b/i;
+const EM_SCHEMA_OU_BANCO = /^\s*(SCHEMA|DATABASE)\b/i;
+
+/** `WITH GRANT OPTION`: quem recebe pode repassar o privilégio sem migração. */
+const REPASSE_DE_PRIVILEGIO = /\bWITH\s+GRANT\s+OPTION\b/gi;
+
+/** `CREATE [OR REPLACE] RULE`: reescreve comandos na tabela, por fora das triggers. */
+const REGRA_DE_REESCRITA = /\bCREATE\s+(?:OR\s+REPLACE\s+)?RULE\b/gi;
+
+/**
+ * Última recursão da busca de SQL dinâmico (a primeira é 0, no arquivo): são conferidos até
+ * `NIVEIS_DE_SQL_DINAMICO + 1` níveis de texto dentro de texto. Mais fundo, reprova (S34).
+ */
+const NIVEIS_DE_SQL_DINAMICO = 3;
+
+/** `CREATE|ALTER ROLE|USER|GROUP` (inclui `USER MAPPING`): papéis ficam fora das migrações. */
+const PAPEL_CRIADO_OU_ALTERADO = /\b(CREATE|ALTER)\s+(ROLE|USER|GROUP)\b/gi;
+const ATRIBUTO_DE_PAPEL = /\b(SUPERUSER|BYPASSRLS|CREATEROLE)\b/gi;
+
+/**
+ * `SET [SESSION|LOCAL] ROLE`, `SET [SESSION|LOCAL] SESSION AUTHORIZATION` e as formas de
+ * parâmetro (`SET "role" TO ...`, `SET session_authorization = ...`), só no início de um
+ * comando (visão `codigo`, com o nome entre aspas): `UPDATE ... SET role = ...` é coluna.
+ * O corpo de função em SQL (`AS $$ SET ROLE ...`) e `BEGIN ATOMIC` também abrem comando.
+ */
+const TROCA_DE_PAPEL = new RegExp(
+  String.raw`(?:^|;|\b(?:BEGIN|ATOMIC|THEN|ELSE|LOOP|AS)\b)\s*SET\s+(?:(?:SESSION|LOCAL)\s+)?` +
+    String.raw`(ROLE|"role"|SESSION\s+AUTHORIZATION|"?session_authorization"?)(?![\w$])`,
+  'gi',
+);
+/** Comando que fixa parâmetro com `SET`: opção de função ou procedimento, ou do banco. */
+const COMANDO_COM_PARAMETRO =
+  /\b(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)|ALTER\s+(?:FUNCTION|PROCEDURE|ROUTINE|DATABASE))\b/gi;
+/** A troca de papel como parâmetro desses comandos (`SET role = postgres`). */
+const PAPEL_COMO_PARAMETRO =
+  /\bSET\s+"?(role|session_authorization)"?\s*(?:=|TO\b|FROM\s+CURRENT\b)/i;
+/** A mesma troca pela função (`set_config('role', ...)`); o nome vem entre aspas. */
+const TROCA_DE_PAPEL_POR_FUNCAO = /\bset_config\s*\(\s*'(?:role|session_authorization)'/gi;
+
+/**
+ * `row_security = off` faz a consulta falhar em vez de filtrar. Vale no código e em texto que
+ * pode ser executado (`set_config('row_security', ...)`), mas não na mensagem de `RAISE` nem na
+ * descrição de `COMMENT ... IS` (Q11).
+ */
+const SEGURANCA_DE_LINHA_DA_SESSAO = /\brow_security\b/gi;
+
+const COPIA_POR_PROGRAMA = /\bCOPY\b[^;]*?\bPROGRAM\b/gi;
+
+const DONO = /\bOWNER\s+TO\s+/gi;
+
+/** Dono aceito pelo nome; `CURRENT_USER` sem aspas também passa (as migrações rodam como ele). */
+const DONO_ACEITO = 'bairrin_migracao';
+
+/**
  * Texto entre aspas que começa como comando: candidato a SQL dinâmico. Exige a forma do
  * comando (`DELETE FROM`, `GRANT ... TO`), para que 'DELETE recusado' não conte.
  */
 const PARECE_COMANDO = new RegExp(
   String.raw`^\s*(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED)\s+)?` +
-    String.raw`(?:TABLE|VIEW|MATERIALIZED|SEQUENCE|TYPE|DOMAIN|FUNCTION|PROCEDURE|EXTENSION|SCHEMA)\b|` +
-    String.raw`ALTER\s+(?:TABLE|FUNCTION|PROCEDURE|ROUTINE|DEFAULT\s+PRIVILEGES|EXTENSION|VIEW|SEQUENCE|TYPE|SCHEMA)\b|` +
+    String.raw`(?:TABLE|VIEW|MATERIALIZED|SEQUENCE|TYPE|DOMAIN|FUNCTION|PROCEDURE|EXTENSION|SCHEMA|POLICY|ROLE|USER|GROUP|RULE)\b|` +
+    String.raw`ALTER\s+(?:TABLE|FUNCTION|PROCEDURE|ROUTINE|DEFAULT\s+PRIVILEGES|EXTENSION|VIEW|SEQUENCE|TYPE|SCHEMA|ROLE|USER|GROUP|POLICY|DATABASE)\b|` +
+    String.raw`ALTER\s+\w[^;]*\bOWNER\s+TO\b|COPY\b|REASSIGN\s+OWNED\b|` +
     String.raw`GRANT\b[^;]*\bTO\b|(?:SELECT|WITH)\b|INSERT\s+INTO\b|DELETE\s+FROM\b|DROP\s+\w|TRUNCATE\b|` +
-    String.raw`SET\s+(?:(?:LOCAL|SESSION)\s+)?\w+\s*(?:=|TO\b)|DO\b|BEGIN\b|DECLARE\b)`,
+    String.raw`SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:(?:"[^"]*"|\w+)\s*(?:=|TO\b)|ROLE\b|SESSION\s+AUTHORIZATION\b)|DO\b|BEGIN\b|DECLARE\b)`,
   'i',
 );
 
@@ -167,6 +296,15 @@ const COMANDO_EM_TEXTO = new RegExp(
 );
 
 /**
+ * Delimitador `$tag$`; a tag aceita letras fora do ASCII, como no Postgres (`$ção$`).
+ * `$1` (parâmetro) não é delimitador.
+ */
+const DELIMITADOR = /^\$(?:[A-Za-z_\u0080-\uFFFF][\w\u0080-\uFFFF]*)?\$/;
+
+/** Logo antes de um `$tag$` que abre corpo de código: `DO [LANGUAGE <nome>]` ou `AS`. */
+const ANTES_DE_CORPO_DE_CODIGO = /\b(?:DO(?:\s+LANGUAGE\s+(?:"[^"]*"|[A-Za-z_][\w$]*))?|AS)\s*$/i;
+
+/**
  * Separa o SQL em visões do mesmo tamanho (para achar a linha de cada ocorrência):
  * - `codigo`: sem comentários, com o conteúdo de textos entre aspas simples trocado por
  *   espaços e os delimitadores `$tag$` apagados (o corpo de DO e de função é código);
@@ -177,6 +315,13 @@ const COMANDO_EM_TEXTO = new RegExp(
  * `profundidade[i]` diz quantos corpos `$tag$` envolvem o caractere `i` (0 no topo; os
  * delimitadores contam como do nível de fora). Também devolve os textos entre aspas simples
  * (`textos`) e onde cada um começa (`posicoesDosTextos`), para achar SQL dinâmico.
+ *
+ * Como no Postgres, o corpo `$tag$` termina na primeira ocorrência do delimitador, mesmo
+ * dentro de comentário ou de texto (S33): nenhum trecho passa do fim do corpo. O corpo só
+ * é lido como código quando o Postgres também o lê assim (depois de `DO` ou de `AS`, no
+ * topo). Os outros usos, em que o Postgres lê o corpo como texto e o verificador o leria
+ * como código, vão para `delimitadoresRecusados` (`{ indice, motivo }`, com `motivo`
+ * `texto`, `aninhado` ou `atravessa`), e a análise os reprova.
  */
 export function separarSql(sql) {
   let codigo = '';
@@ -186,6 +331,11 @@ export function separarSql(sql) {
   const profundidade = [];
   const textos = [];
   const posicoesDosTextos = [];
+  const delimitadoresRecusados = [];
+  /**
+   * Corpos abertos: `fim` é onde começa o delimitador que fecha; `comprimento`, o tamanho dele;
+   * `recusado`, se o corpo já foi para `delimitadoresRecusados`.
+   */
   const corpos = [];
   const emBranco = (trecho) => trecho.replace(/[^\n]/g, ' ');
   const acrescentar = (trechoCodigo, trechoComandos, trechoSemComentarios) => {
@@ -195,17 +345,42 @@ export function separarSql(sql) {
     semComentarios += trechoSemComentarios;
     for (let k = 0; k < trechoCodigo.length; k += 1) profundidade.push(corpos.length);
   };
+  /** Comentário, texto ou identificador que não fecha antes do fim do corpo é cortado ali. */
+  const cortar = (inicio, fim, limite, recusar) => {
+    if (fim <= limite) return fim;
+    // Dentro de um `$tag$` já recusado, um aviso basta.
+    if (recusar && corpos.length > 0 && !corpos.some(({ recusado }) => recusado)) {
+      delimitadoresRecusados.push({ indice: inicio, motivo: 'atravessa' });
+    }
+    return limite;
+  };
+  /** Colado a um identificador (`a$b$`, `ação$x$`), o `$` faz parte do nome, como no Postgres. */
+  const coladoANome = (inicio) => {
+    const anterior = /[\w$\u0080-\uFFFF]*$/.exec(sql.slice(Math.max(0, inicio - 200), inicio))[0];
+    return /^[A-Za-z_\u0080-\uFFFF]/.test(anterior);
+  };
   let i = 0;
   while (i < sql.length) {
-    const resto = sql.slice(i);
-    if (resto.startsWith('--')) {
-      const fim = sql.indexOf('\n', i);
-      const trecho = sql.slice(i, fim === -1 ? sql.length : fim);
-      acrescentar(emBranco(trecho), emBranco(trecho), emBranco(trecho));
-      i += trecho.length;
+    const corpo = corpos.at(-1);
+    if (corpo !== undefined && i === corpo.fim) {
+      corpos.pop();
+      const delimitador = sql.slice(i, i + corpo.comprimento);
+      acrescentar(emBranco(delimitador), emBranco(delimitador), delimitador);
+      i += corpo.comprimento;
       continue;
     }
-    if (resto.startsWith('/*')) {
+    const limite = corpo === undefined ? sql.length : corpo.fim;
+    const comeca = (marca) => sql.startsWith(marca, i) && i + marca.length <= limite;
+    if (comeca('--')) {
+      // No fim do corpo o comentário de linha acaba, como no PL/pgSQL; não é recusado.
+      const quebra = sql.indexOf('\n', i);
+      const fim = cortar(i, quebra === -1 ? sql.length : quebra, limite, false);
+      const trecho = sql.slice(i, fim);
+      acrescentar(emBranco(trecho), emBranco(trecho), emBranco(trecho));
+      i = fim;
+      continue;
+    }
+    if (comeca('/*')) {
       // Comentários de bloco aninham no Postgres.
       let nivel = 0;
       let j = i;
@@ -221,9 +396,10 @@ export function separarSql(sql) {
           j += 1;
         }
       }
-      const trecho = sql.slice(i, j);
+      const fim = cortar(i, nivel === 0 ? j : sql.length + 1, limite, true);
+      const trecho = sql.slice(i, fim);
       acrescentar(emBranco(trecho), emBranco(trecho), emBranco(trecho));
-      i = j;
+      i = fim;
       continue;
     }
     if (sql[i] === "'") {
@@ -235,12 +411,15 @@ export function separarSql(sql) {
         else if (sql[j] === "'") break;
         else j += 1;
       }
-      const trecho = sql.slice(i, j + 1);
-      textos.push(sql.slice(i + 1, j).replace(/''/g, "'"));
+      // `j` é a aspa que fecha; sem ela, o texto vai até o fim.
+      const fim = cortar(i, j + 1, limite, true);
+      const trecho = sql.slice(i, fim);
+      const fechado = fim === j + 1;
+      textos.push(sql.slice(i + 1, fechado ? j : fim).replace(/''/g, "'"));
       posicoesDosTextos.push(i);
-      const vazio = `'${emBranco(trecho.slice(1, -1))}'`.slice(0, trecho.length);
-      acrescentar(vazio, vazio, trecho);
-      i += trecho.length;
+      const vazio = `'${emBranco(trecho.slice(1, fechado ? -1 : undefined))}${fechado ? "'" : ''}`;
+      acrescentar(vazio.slice(0, trecho.length), vazio.slice(0, trecho.length), trecho);
+      i = fim;
       continue;
     }
     if (sql[i] === '"') {
@@ -250,26 +429,46 @@ export function separarSql(sql) {
         else if (sql[j] === '"') break;
         else j += 1;
       }
-      const trecho = sql.slice(i, j + 1);
-      acrescentar(trecho, `"${emBranco(trecho.slice(1, -1))}"`.slice(0, trecho.length), trecho);
-      i += trecho.length;
+      const fim = cortar(i, j + 1, limite, true);
+      const trecho = sql.slice(i, fim);
+      const fechado = fim === j + 1;
+      const vazio = `"${emBranco(trecho.slice(1, fechado ? -1 : undefined))}${fechado ? '"' : ''}`;
+      acrescentar(trecho, vazio.slice(0, trecho.length), trecho);
+      i = fim;
       continue;
     }
-    const cifrao = /^\$([A-Za-z_][\w]*)?\$/.exec(resto);
-    if (cifrao && !/[\w$]$/.test(sql.slice(0, i))) {
+    const cifrao = sql[i] === '$' ? DELIMITADOR.exec(sql.slice(i, limite)) : null;
+    if (cifrao && !coladoANome(i)) {
       const delimitador = cifrao[0];
-      // O delimitador que fecha é o mesmo que abriu o corpo mais interno; outro abre um novo.
-      const fecha = corpos.at(-1) === delimitador;
-      if (fecha) corpos.pop();
+      let motivo;
+      if (corpo !== undefined) motivo = 'aninhado';
+      else if (!ANTES_DE_CORPO_DE_CODIGO.test(comandos.slice(-200))) motivo = 'texto';
+      if (motivo !== undefined) delimitadoresRecusados.push({ indice: i, motivo });
       acrescentar(emBranco(delimitador), emBranco(delimitador), delimitador);
-      if (!fecha) corpos.push(delimitador);
       i += delimitador.length;
+      // O corpo termina na primeira ocorrência do mesmo delimitador, dentro do corpo de fora.
+      const fecha = sql.indexOf(delimitador, i);
+      const cabe = fecha !== -1 && fecha + delimitador.length <= limite;
+      corpos.push({
+        fim: cabe ? fecha : limite,
+        comprimento: cabe ? delimitador.length : 0,
+        recusado: motivo !== undefined,
+      });
       continue;
     }
     acrescentar(sql[i], sql[i], sql[i]);
     i += 1;
   }
-  return { codigo, comandos, topo, semComentarios, profundidade, textos, posicoesDosTextos };
+  return {
+    codigo,
+    comandos,
+    topo,
+    semComentarios,
+    profundidade,
+    textos,
+    posicoesDosTextos,
+    delimitadoresRecusados,
+  };
 }
 
 /** Nome sem aspas e em minúsculas quando não citado, como o Postgres resolve. */
@@ -325,14 +524,27 @@ function comecaComGuarda(semComentarios) {
 }
 
 /**
- * Textos entre aspas com cara de comando, fora de `RAISE` e `COMMENT ... IS`, inclusive os de
- * dentro deles (`format` em `EXECUTE`), até 3 níveis.
+ * Textos entre aspas com cara de comando, fora de `RAISE` e `COMMENT ... IS`, e todo argumento
+ * literal de `EXECUTE` (direto ou modelo de `format`), inclusive os de dentro deles, até
+ * `NIVEIS_DE_SQL_DINAMICO` níveis abaixo do primeiro. Se ainda houver texto assim mais fundo,
+ * acrescenta o nível em `excedidos` (a migração reprova; S34).
  */
-function textosDeSqlDinamico(visoes, nivel = 0) {
-  if (nivel > 3) return [];
-  return textosExecutaveis(visoes)
-    .filter((texto) => PARECE_COMANDO.test(texto))
-    .flatMap((texto) => [texto, ...textosDeSqlDinamico(separarSql(texto), nivel + 1)]);
+function textosDeSqlDinamico(visoes, nivel = 0, excedidos = []) {
+  const { comandos, textos, posicoesDosTextos } = visoes;
+  const candidatos = textos.filter((texto, indice) => {
+    const posicao = posicoesDosTextos[indice];
+    const antes = comandos.slice(Math.max(0, posicao - 200), posicao);
+    if (ANTES_DE_ARGUMENTO_DE_EXECUTE.test(antes)) return true;
+    return !ANTES_DE_TEXTO_NAO_EXECUTADO.test(antes) && PARECE_COMANDO.test(texto);
+  });
+  if (nivel > NIVEIS_DE_SQL_DINAMICO) {
+    if (candidatos.length > 0) excedidos.push(nivel);
+    return [];
+  }
+  return candidatos.flatMap((texto) => [
+    texto,
+    ...textosDeSqlDinamico(separarSql(texto), nivel + 1, excedidos),
+  ]);
 }
 
 /** Textos entre aspas de primeiro nível, menos os de `RAISE` e `COMMENT ... IS`. */
@@ -352,11 +564,16 @@ function fimDoComando({ comandos, profundidade }, inicio) {
   return comandos.length;
 }
 
-/** Texto do comando em `[inicio, fim)` só no nível de `inicio` (corpos internos em branco). */
-function comandoNoNivel({ comandos, profundidade }, inicio, fim) {
+/**
+ * Texto do comando em `[inicio, fim)` só no nível de `inicio` (corpos internos em branco), na
+ * visão `comandos` ou na indicada em `visao`.
+ */
+function comandoNoNivel(visoes, inicio, fim, visao = 'comandos') {
+  const { profundidade } = visoes;
+  const fonte = visoes[visao];
   const nivel = profundidade[inicio];
   let texto = '';
-  for (let i = inicio; i < fim; i += 1) texto += profundidade[i] === nivel ? comandos[i] : ' ';
+  for (let i = inicio; i < fim; i += 1) texto += profundidade[i] === nivel ? fonte[i] : ' ';
   return texto;
 }
 
@@ -389,6 +606,83 @@ function alcancaSomenteAcrescimo(objetos) {
     // Sem schema, depende do search_path: na dúvida, conta como a tabela protegida.
     return nomes.some((alvo) => alvo.nome === nome && (alvo.schema ?? schema) === schema);
   });
+}
+
+/**
+ * O trecho é um único texto literal (`'...'`, `E'...'` ou corpo `$tag$ ... $tag$`)? `nivel` é o
+ * trecho na visão `comandos` com os corpos internos em branco; `bruto`, o mesmo trecho com o
+ * conteúdo, para reconhecer o corpo `$tag$` (que no nível aparece só como espaço).
+ */
+function ehLiteralUnico(nivel, bruto) {
+  if (/\S/.test(nivel)) return /^\s*E?'[^']*'\s*$/i.test(nivel);
+  return /^\s*(\$(?:[A-Za-z_]\w*)?\$)[\s\S]*\1\s*$/.test(bruto);
+}
+
+/** Conteúdo de `E'...'` como o Postgres o lê (`\x25` é `%`, `''` é `'`), numa passada só. */
+function decodificarEscapes(texto) {
+  const simples = { b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+  return texto.replace(
+    /''|\\(x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[\s\S])/g,
+    (escape, corpo) => {
+      if (escape === "''") return "'";
+      let codigo;
+      if (/^[xuU]./.test(corpo)) codigo = Number.parseInt(corpo.slice(1), 16);
+      else if (/^[0-7]/.test(corpo)) codigo = Number.parseInt(corpo, 8);
+      else return simples[corpo] ?? corpo;
+      // Ponto de código inválido o Postgres recusa; aqui vira um caractere qualquer.
+      return codigo <= 0x10ffff ? String.fromCodePoint(codigo) : '\uFFFD';
+    },
+  );
+}
+
+/** Conteúdo de um literal único (`'...'`, `E'...'` ou `$tag$...$tag$`), como o Postgres o lê. */
+function conteudoDoLiteral(bruto) {
+  const comAspas = /^\s*(E?)'([\s\S]*)'\s*$/i.exec(bruto);
+  if (comAspas === null) {
+    return /^\s*(\$[^$]*\$)([\s\S]*)\1\s*$/.exec(bruto)?.[2] ?? '';
+  }
+  if (comAspas[1] === '') return comAspas[2].replace(/''/g, "'");
+  return decodificarEscapes(comAspas[2]);
+}
+
+/**
+ * Especificadores de `format` aceitos no modelo de `EXECUTE`: `%I`, `%L` (também com posição,
+ * `%1$I`) e `%%`. `%s` insere o valor sem aspas: o comando executado não dá para conferir (S34).
+ */
+function modeloDeFormatAceito(modelo) {
+  return [...modelo.matchAll(/%(%|(?:\d+\$)?[IL])?/g)].every((especificador) => especificador[1]);
+}
+
+/**
+ * Problema do argumento de um `EXECUTE` em `[inicio, fim)`: concatenação (`||`), argumento
+ * que não é literal único nem `format(<literal único>, ...)` ou modelo de `format` com
+ * especificador que não é `%I`, `%L` nem `%%`. Sem problema, `undefined`.
+ */
+function problemaDoArgumentoDeExecute(visoes, inicio, fim) {
+  const nivel = comandoNoNivel(visoes, inicio, fim);
+  const bruto = visoes.semComentarios.slice(inicio, fim);
+  if (nivel.includes('||')) return 'concatenado';
+  const chamada = /^(\s*format\s*\()[\s\S]*\)\s*$/i.exec(nivel);
+  if (chamada) {
+    const abre = chamada[1].length;
+    const virgula = nivel.indexOf(',', abre);
+    const fimDoModelo = virgula === -1 ? nivel.lastIndexOf(')') : virgula;
+    const modelo = bruto.slice(abre, fimDoModelo);
+    if (!ehLiteralUnico(nivel.slice(abre, fimDoModelo), modelo)) return 'nao-literal';
+    return modeloDeFormatAceito(conteudoDoLiteral(modelo)) ? undefined : 'formato';
+  }
+  return ehLiteralUnico(nivel, bruto) ? undefined : 'nao-literal';
+}
+
+/** Papel normalizado de `OWNER TO`, ou `undefined` se for um dos aceitos. */
+function donoRecusado(codigo, inicioDoPapel) {
+  const papel = new RegExp(`^${IDENTIFICADOR}`).exec(codigo.slice(inicioDoPapel))?.[0];
+  if (papel === undefined) return '(sem papel)';
+  const normalizado = normalizarIdentificador(papel);
+  if (normalizado === DONO_ACEITO) return undefined;
+  // `CURRENT_USER` só sem aspas: entre aspas é um papel com esse nome.
+  if (!papel.startsWith('"') && normalizado === 'current_user') return undefined;
+  return normalizado;
 }
 
 /**
@@ -467,6 +761,31 @@ function analisarTrecho(visoes, dinamico) {
     });
   }
 
+  const mensagensDoDelimitador = {
+    texto:
+      '$tag$ usado como texto (S33): o Postgres lê o corpo como texto e o verificador, como ' +
+      "código; $tag$ só abre corpo de DO ou de função (depois de DO ou AS); use '...' ou " +
+      "format('...')",
+    aninhado:
+      '$tag$ dentro de outro corpo $tag$ (S33): o Postgres lê o de dentro como texto; em SQL ' +
+      "dinâmico use '...' ou format('...')",
+    atravessa:
+      'texto, identificador entre aspas ou comentário /* */ passa do fim do corpo $tag$ (S33): ' +
+      'o corpo termina no primeiro delimitador igual ao que o abriu',
+  };
+  for (const { indice, motivo } of visoes.delimitadoresRecusados) {
+    problemas.push({ linha: linha(indice), mensagem: mensagensDoDelimitador[motivo] + sufixo });
+  }
+
+  for (const ocorrencia of comandos.matchAll(REPASSE_DE_PRIVILEGIO)) {
+    problemas.push({
+      linha: linha(ocorrencia.index),
+      mensagem:
+        'GRANT ... WITH GRANT OPTION (S34): quem recebe repassaria o privilégio sem migração ' +
+        `nem revisão${sufixo}`,
+    });
+  }
+
   for (const ocorrencia of codigo.matchAll(GRANT)) {
     const [, alvo, destino] = ocorrencia;
     const papeis = listaDeNomes(destino.replace(/^\s*GROUP\s+/i, '')).map(({ nome }) => nome);
@@ -479,7 +798,28 @@ function analisarTrecho(visoes, dinamico) {
       });
     }
     const separado = /^([\s\S]*?)\bON\b([\s\S]*)$/i.exec(alvo);
-    if (!separado) continue;
+    if (!separado) {
+      problemas.push({
+        linha: linha(ocorrencia.index),
+        mensagem:
+          'GRANT de papel sem ON (Q6): dar um papel a outro (pertencimento) é feito fora das ' +
+          `migrações; aqui só GRANT de privilégio em objeto${sufixo}`,
+      });
+      continue;
+    }
+    const emSchemaOuBanco = EM_SCHEMA_OU_BANCO.exec(separado[2]);
+    if (emSchemaOuBanco && PRIVILEGIO_DE_CRIAR.test(separado[1])) {
+      const objeto = emSchemaOuBanco[1].toUpperCase();
+      const criadores = papeis.filter((nome) => nome !== DONO_ACEITO && nome !== 'current_user');
+      for (const papel of criadores) {
+        problemas.push({
+          linha: linha(ocorrencia.index),
+          mensagem:
+            `GRANT CREATE (ou ALL) em ${objeto} para ${papel} (S34): só ${DONO_ACEITO} cria ` +
+            `objetos; quem cria é dono e o dono ignora o RLS${sufixo}`,
+        });
+      }
+    }
     const privilegios = [...separado[1].matchAll(PRIVILEGIO_QUE_ALTERA)].map(([p]) =>
       p.toUpperCase(),
     );
@@ -526,6 +866,163 @@ function analisarTrecho(visoes, dinamico) {
       mensagem: `objeto movido para o schema public (S2)${sufixo}`,
     });
   }
+
+  for (const ocorrencia of comandos.matchAll(EXECUTE_DINAMICO)) {
+    // No topo do arquivo, fora de corpo de DO ou de função, não há PL/pgSQL: `EXECUTE` ali é
+    // o de comando preparado ou uma coluna chamada execute. Em SQL dinâmico continua valendo,
+    // porque o texto pode ser corpo de função (`AS 'BEGIN EXECUTE c; END'`).
+    if (!dinamico && visoes.profundidade[ocorrencia.index] === 0) continue;
+    const inicio = ocorrencia.index + ocorrencia[0].length;
+    const fimDoComandoAtual = fimDoComando(visoes, ocorrencia.index);
+    const resto = comandoNoNivel(visoes, inicio, fimDoComandoAtual);
+    const corte = resto.search(FIM_DO_ARGUMENTO_DE_EXECUTE);
+    const fim = corte === -1 ? fimDoComandoAtual : inicio + corte;
+    const problema = problemaDoArgumentoDeExecute(visoes, inicio, fim);
+    if (problema === undefined) continue;
+    const mensagensDoExecute = {
+      concatenado:
+        'EXECUTE com SQL concatenado (||) (Q6): não dá para conferir o comando executado; ' +
+        "use EXECUTE '<literal>' ou format('<literal>', ...) com %I e %L",
+      'nao-literal':
+        "EXECUTE com argumento que não é literal único nem format('<literal>', ...) (Q6): " +
+        'não dá para conferir o comando executado',
+      formato:
+        'EXECUTE de format com especificador que não é %I, %L nem %% (S34): %s insere o valor ' +
+        'sem aspas e não dá para conferir o comando executado',
+    };
+    problemas.push({
+      linha: linha(ocorrencia.index),
+      mensagem: mensagensDoExecute[problema] + sufixo,
+    });
+  }
+
+  for (const ocorrencia of comandos.matchAll(PRIVILEGIO_PADRAO_CONCEDIDO)) {
+    problemas.push({
+      linha: linha(ocorrencia.index),
+      mensagem:
+        'ALTER DEFAULT PRIVILEGES ... GRANT (Q6): privilégio padrão vale para objetos futuros ' +
+        `sem revisão; use GRANT explícito em cada objeto (o REVOKE é aceito)${sufixo}`,
+    });
+  }
+
+  for (const ocorrencia of comandos.matchAll(POLITICA)) {
+    const acao = `${ocorrencia[1].toUpperCase()} POLICY`;
+    const cabecalho = ocorrencia[0].split(/\b(?:USING|WITH\s+CHECK)\b/i)[0];
+    // `ALTER POLICY ... RENAME TO` só troca o nome (e já reprova como destrutivo).
+    if (acao === 'ALTER POLICY' && /\bRENAME\b/i.test(cabecalho)) continue;
+    const para = /\bTO\b/i.exec(cabecalho);
+    if (para === null) {
+      // Sem TO, o ALTER POLICY mantém os papéis da política.
+      if (acao === 'ALTER POLICY') continue;
+      problemas.push({
+        linha: linha(ocorrencia.index),
+        mensagem:
+          'CREATE POLICY sem TO (Seg-2): a política valeria para PUBLIC; restrinja ao papel ' +
+          `da aplicação (TO bairrin_app)${sufixo}`,
+      });
+      continue;
+    }
+    const inicioDosPapeis = ocorrencia.index + para.index + para[0].length;
+    const papeis = listaDeNomes(
+      codigo.slice(inicioDosPapeis, ocorrencia.index + cabecalho.length),
+    ).map(({ nome }) => nome);
+    for (const papel of papeis.filter(papelSemPolitica)) {
+      problemas.push({
+        linha: linha(ocorrencia.index),
+        mensagem:
+          `${acao} para ${papel} (Q6): PUBLIC, os papéis do Supabase (anon, authenticated, ` +
+          `service_role) e os administrativos (postgres, supabase_*, pg_*) não recebem ` +
+          `política${sufixo}`,
+      });
+    }
+  }
+
+  for (const ocorrencia of comandos.matchAll(PAPEL_CRIADO_OU_ALTERADO)) {
+    const acao = `${ocorrencia[1]} ${ocorrencia[2]}`.toUpperCase();
+    problemas.push({
+      linha: linha(ocorrencia.index),
+      mensagem: `${acao} (Q6): papéis são criados e alterados fora das migrações${sufixo}`,
+    });
+  }
+  for (const ocorrencia of comandos.matchAll(ATRIBUTO_DE_PAPEL)) {
+    problemas.push({
+      linha: linha(ocorrencia.index),
+      mensagem: `${ocorrencia[1].toUpperCase()} (Q6): atributo de papel privilegiado não é aceito em migração${sufixo}`,
+    });
+  }
+
+  const trocaDePapel = (indice, acao) =>
+    problemas.push({
+      linha: linha(indice),
+      mensagem: `troca de papel (${acao}) (Q6): a migração roda só como bairrin_migracao${sufixo}`,
+    });
+  for (const ocorrencia of codigo.matchAll(TROCA_DE_PAPEL)) {
+    const parametro = ocorrencia[1].replace(/"/g, '').replace(/\s+/g, ' ').toUpperCase();
+    const acao = parametro === 'SESSION_AUTHORIZATION' ? 'SESSION AUTHORIZATION' : parametro;
+    trocaDePapel(ocorrencia.index + ocorrencia[0].search(/SET/i), `SET ${acao}`);
+  }
+  for (const ocorrencia of comandos.matchAll(COMANDO_COM_PARAMETRO)) {
+    const fim = fimDoComando(visoes, ocorrencia.index);
+    const comando = comandoNoNivel(visoes, ocorrencia.index, fim, 'codigo');
+    const opcao = PAPEL_COMO_PARAMETRO.exec(comando);
+    if (opcao === null) continue;
+    trocaDePapel(ocorrencia.index + opcao.index, `SET ${opcao[1].toLowerCase()} como parâmetro`);
+  }
+  for (const ocorrencia of visoes.semComentarios.matchAll(TROCA_DE_PAPEL_POR_FUNCAO)) {
+    trocaDePapel(ocorrencia.index, 'set_config');
+  }
+
+  // Q11: no código e nos textos que podem ser executados; não na mensagem de RAISE nem na
+  // descrição de COMMENT ... IS.
+  const ondeHaRowSecurity = [...codigo.matchAll(SEGURANCA_DE_LINHA_DA_SESSAO)].map(
+    (ocorrencia) => ocorrencia.index,
+  );
+  visoes.textos.forEach((texto, indice) => {
+    const posicao = visoes.posicoesDosTextos[indice];
+    const antes = comandos.slice(Math.max(0, posicao - 200), posicao);
+    if (ANTES_DE_TEXTO_NAO_EXECUTADO.test(antes)) return;
+    if (/\brow_security\b/i.test(texto)) ondeHaRowSecurity.push(posicao);
+  });
+  for (const indice of ondeHaRowSecurity.sort((a, b) => a - b)) {
+    problemas.push({
+      linha: linha(indice),
+      mensagem: `row_security (Q6): o RLS da sessão não é configurado em migração${sufixo}`,
+    });
+  }
+
+  for (const ocorrencia of comandos.matchAll(REGRA_DE_REESCRITA)) {
+    problemas.push({
+      linha: linha(ocorrencia.index),
+      mensagem:
+        'CREATE RULE (S34): a regra reescreve o comando antes das triggers e contornaria a ' +
+        `imutabilidade da auditoria; não é aceita em migração${sufixo}`,
+    });
+  }
+
+  for (const ocorrencia of comandos.matchAll(COPIA_POR_PROGRAMA)) {
+    problemas.push({
+      linha: linha(ocorrencia.index),
+      mensagem: `COPY ... PROGRAM (Q6): executa comando no servidor do banco; não é aceito em migração${sufixo}`,
+    });
+  }
+
+  const regrasDeDono = [
+    [DONO, 'OWNER TO', 'Seg-2'],
+    [SCHEMA_COM_DONO, 'CREATE SCHEMA ... AUTHORIZATION', 'S34'],
+    [DONO_REATRIBUIDO, 'REASSIGN OWNED BY ... TO', 'S34'],
+  ];
+  for (const [regex, comando, origem] of regrasDeDono) {
+    for (const ocorrencia of comandos.matchAll(regex)) {
+      const papel = donoRecusado(codigo, ocorrencia.index + ocorrencia[0].length);
+      if (papel === undefined) continue;
+      problemas.push({
+        linha: linha(ocorrencia.index),
+        mensagem:
+          `${comando} ${papel} (${origem}): o dono dos objetos é ${DONO_ACEITO} (ou ` +
+          `CURRENT_USER); o dono ignora o RLS${sufixo}`,
+      });
+    }
+  }
   return { problemas, criacoes, comRls };
 }
 
@@ -536,12 +1033,20 @@ function analisarTrecho(visoes, dinamico) {
 export function analisarMigracao(pasta, sql) {
   const problemas = [];
   const visoes = separarSql(sql);
-  const dinamicos = textosDeSqlDinamico(visoes);
+  const excedidos = [];
+  const dinamicos = textosDeSqlDinamico(visoes, 0, excedidos);
 
   if (!temNotaDeReversao(sql)) {
     problemas.push({
       mensagem:
         'falta a nota "-- reversao: <como desfazer>" no cabeçalho, antes do primeiro comando',
+    });
+  }
+  if (excedidos.length > 0) {
+    problemas.push({
+      mensagem:
+        `SQL dinâmico com mais de ${NIVEIS_DE_SQL_DINAMICO + 1} níveis (texto dentro de texto) ` +
+        '(S34): o verificador não confere o comando mais fundo; use menos níveis',
     });
   }
 

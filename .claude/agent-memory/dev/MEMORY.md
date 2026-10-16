@@ -1,12 +1,13 @@
 - [Armadilhas do pnpm 12](pnpm12-armadilhas.md) — .npmrc ignorado, allowBuilds reescrito, minimumReleaseAge em minutos, --lockfile-only, pares opcionais do Vite
 - [Nest 12 em runtime e testes](nest12-runtime.md) — tsc com rewrite de .ts, tsx quebra DI, Vitest 5 sem SWC, condição @bairrin/fonte
-- [Base HTTP e logs no Nest 12](nest12-http-logs.md) — singleton do nestjs-pino, body-parser antes dos módulos, vínculos de filho sem formatador, msg=err.message
+- [Base HTTP e logs no Nest 12](nest12-http-logs.md) — singleton do nestjs-pino, vínculos de filho, hook logMethod, context = pilha nos hooks, lint de log
 - [Zod 4 em contratos](zod4-contratos.md) — locale ptBR via z.config, issue sem input, marcador de obrigatório
-- [Infra local em Docker](infra-local-docker.md) — trust no pg_hba do container, sem psql no host, tmpfs do banco de teste, PG 17
+- [Infra local em Docker](infra-local-docker.md) — trust no pg_hba, sem psql no host, tmpfs do teste, REVOKE em public, testes de catálogo (dono/ROLLBACK)
 - [tsconfig sem DOM/Node](tsconfig-sem-dom.md) — como tipar fetch/AbortController/timers em pacotes compartilhados; lint de reject
 - [Painel: Vite, Vitest e tokens CSS](painel-vite-vitest.md) — CSS virtual vira arquivo, config lê tokens por runnerImport, Vitest esvazia .css, env.d.ts
 - [Imagem do painel: Caddy e Fly](painel-caddy-docker.md) — handle_errors p/ cabeçalhos, capability do binário, contexto do fly deploy, CSP no Chrome headless
 - [Prisma 7 e banco](prisma7-banco.md) — multiSchema, _prisma_migrations em `migracoes`, client gerado em src, `node --test` com glob
+- [Verificador de migrações](verificador-migracoes.md) — visões alinhadas, $tag$ fecha no 1º delimitador, EXECUTE, brechas %I e E-escape, sonda PG descartável
 - [dependency-cruiser e fronteiras](depcruise-fronteiras.md) — exclude derruba npm, caminhos ../ nas fixtures, CLI no teste
 - [pg-boss, outbox e e-mail](pgboss-eventos-email.md) — pg-boss sem CREATE (CLI + GRANTs), output do job guarda erro, nodemailer 10, Mailpit, lint
 - [Docs: comandos verificados](docs-comandos-verificados.md) — Prisma CLI a partir de apps/api, cópia limpa real, node --run sem env-file, Prettier, EAS pago

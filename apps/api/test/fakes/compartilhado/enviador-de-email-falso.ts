@@ -1,7 +1,12 @@
 // `EnviadorDeEmail` em memória, para testes de unidade e de caso de uso: guarda
 // as mensagens em vez de enviar. Os testes de integração usam o SMTP real
-// contra o Mailpit.
-import { EnviadorDeEmail, FalhaNoEnvioDeEmail, type MensagemDeEmail } from './enviador-de-email.ts';
+// contra o Mailpit. Fica em `test/fakes/` (fora do build): código de produção
+// não importa daqui (regra `producao-nao-importa-test` do dependency-cruiser).
+import {
+  EnviadorDeEmail,
+  FalhaNoEnvioDeEmail,
+  type MensagemDeEmail,
+} from '../../../src/compartilhado/email/enviador-de-email.ts';
 
 export class EnviadorDeEmailFalso extends EnviadorDeEmail {
   readonly #enviadas: MensagemDeEmail[] = [];

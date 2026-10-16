@@ -117,6 +117,15 @@ module.exports = {
       },
     },
     {
+      name: 'producao-nao-importa-test',
+      comment:
+        'Código de produção da API não importa fakes nem helpers de apps/api/test/ (Q7): só ' +
+        'os testes de unidade (*.test.ts) de src/ podem.',
+      severity: 'error',
+      from: { path: '^apps/api/src/', pathNot: '\\.test\\.ts$' },
+      to: { path: '^apps/api/test/' },
+    },
+    {
       name: 'fora-da-api-nao-importa-api',
       comment: 'Apps e pacotes não importam código de apps/api: o que é comum vai para packages/.',
       severity: 'error',

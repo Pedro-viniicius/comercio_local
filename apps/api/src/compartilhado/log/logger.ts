@@ -1,13 +1,15 @@
 // Configuração do logger (pino via nestjs-pino): JSON, um registro por
 // requisição, sem corpo, sem cabeçalhos, URL sem query e redação de chaves
 // sensíveis em todo objeto registrado e em todo vínculo de logger filho
-// (CA-F3; S20).
+// (CA-F3; S20). O texto do registro é só o que o código escreveu: sem a
+// mensagem do erro nem argumentos interpolados (Seg-1).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Params } from 'nestjs-pino';
 import pino, {
   type Bindings,
   type DestinationStream,
   type LevelWithSilent,
+  type LogFn,
   type Logger,
   type LoggerOptions,
 } from 'pino';
@@ -19,16 +21,29 @@ import { redigir, resumirErro, type ResumoDeErro, urlSemQuery } from './redator.
 /** Nome do campo com o id da requisição em todo registro feito durante ela. */
 export const CAMPO_ID_REQUISICAO = 'idRequisicao';
 
-/** Requisição como aparece no log: lista fechada, sem corpo nem cabeçalhos. */
-export function serializarRequisicao(req: IncomingMessage): { metodo?: string; url?: string } {
-  const original = (req as IncomingMessage & { originalUrl?: unknown }).originalUrl;
-  const url = typeof original === 'string' ? original : req.url;
-  return { metodo: req.method, url: url === undefined ? undefined : urlSemQuery(url) };
+/**
+ * Requisição como aparece no log: lista fechada, sem corpo nem cabeçalhos.
+ * Valor que não é objeto (`{ req: null }`, `{ req: 'texto' }`) vira `{}`: o
+ * serializador não lança e o valor não chega à linha.
+ */
+export function serializarRequisicao(req: unknown): { metodo?: string; url?: string } {
+  if (typeof req !== 'object' || req === null) return {};
+  const { method, url, originalUrl } = req as Partial<IncomingMessage> & { originalUrl?: unknown };
+  const caminho = typeof originalUrl === 'string' ? originalUrl : url;
+  return {
+    metodo: typeof method === 'string' ? method : undefined,
+    url: typeof caminho === 'string' ? urlSemQuery(caminho) : undefined,
+  };
 }
 
-/** Resposta como aparece no log: só o status (cabeçalhos podem ter `set-cookie`). */
-export function serializarResposta(res: ServerResponse): { status: number } {
-  return { status: res.statusCode };
+/**
+ * Resposta como aparece no log: só o status (cabeçalhos podem ter `set-cookie`).
+ * Valor que não é objeto vira `{}`, como em `serializarRequisicao`.
+ */
+export function serializarResposta(res: unknown): { status?: number } {
+  if (typeof res !== 'object' || res === null) return {};
+  const { statusCode } = res as Partial<ServerResponse>;
+  return { status: typeof statusCode === 'number' ? statusCode : undefined };
 }
 
 /**
@@ -50,6 +65,79 @@ const CHAVES_COM_SERIALIZADOR = ['req', 'res', 'err'] as const;
 /** Redator aplicado a todo objeto registrado e a todo vínculo de logger. */
 function redigirParaLog<T>(objeto: T): T {
   return redigir(objeto, { chavesIntactas: CHAVES_COM_SERIALIZADOR });
+}
+
+/** Texto do registro feito sem texto (só com objeto ou só com erro). */
+export const TEXTO_SEM_MENSAGEM = 'sem mensagem';
+
+/**
+ * Contexto do nestjs-pino (chave `context`) que não é um nome curto de uma
+ * linha. Os hooks de encerramento do Nest chamam `Logger.error(erro, erro.stack)`
+ * sem contexto, e o nestjs-pino toma o último argumento (a pilha, com a
+ * mensagem) como contexto (S35b).
+ */
+export const CONTEXTO_DESCARTADO = 'contexto descartado';
+const TAMANHO_MAXIMO_DO_CONTEXTO = 80;
+
+/** Contexto aceito como veio: ausente ou texto de uma linha com até 80 caracteres. */
+function ehContextoAceito(contexto: unknown): boolean {
+  return (
+    contexto === undefined ||
+    (typeof contexto === 'string' &&
+      contexto.length <= TAMANHO_MAXIMO_DO_CONTEXTO &&
+      !/[\n\r\u2028\u2029]/.test(contexto))
+  );
+}
+
+/**
+ * Objeto do registro, sem alterar o recebido (só copia quando precisa mexer):
+ * - `Error` vira `{ err }` e vai para `serializarErro`;
+ * - a chave própria `msg` sai: o pino a escreveria crua, ao lado do texto,
+ *   e a linha teria dois `"msg"` (R12). A `message` fica com o redator;
+ * - `context` que não passa em `ehContextoAceito` vira `CONTEXTO_DESCARTADO`.
+ * A cópia leva só as propriedades próprias enumeráveis, as mesmas que o
+ * redator percorre. Objeto que não pode ser lido vira `{}`: o log não lança.
+ */
+function objetoDoLog(objeto: object): object {
+  if (objeto instanceof Error) return { err: objeto };
+  try {
+    const comMsg = Object.hasOwn(objeto, 'msg');
+    const contextoRecusado =
+      Object.hasOwn(objeto, 'context') &&
+      !ehContextoAceito((objeto as { context?: unknown }).context);
+    if (!comMsg && !contextoRecusado) return objeto;
+    const copia: Record<string, unknown> = { ...objeto };
+    delete copia['msg'];
+    if (contextoRecusado) copia['context'] = CONTEXTO_DESCARTADO;
+    return copia;
+  } catch {
+    // Getter que lança ou proxy revogado: o registro sai só com o texto.
+    return {};
+  }
+}
+
+/**
+ * Argumentos de toda chamada de log, antes do pino (Seg-1). O texto (`msg`)
+ * não passa pelo redator; sem esta troca, o pino põe nele `erro.message`
+ * quando o registro vem sem texto (`error(erro)`, `error({ err })` e o
+ * `isWrongExceptionsHandlerContract` do nestjs-pino) e interpola nele os
+ * argumentos que vêm depois (`info('conta %s', email)`).
+ * - o objeto do primeiro argumento passa por `objetoDoLog` (`Error`, `msg`
+ *   e `context`);
+ * - sem texto, ou com texto que não é string, o texto é `TEXTO_SEM_MENSAGEM`;
+ * - argumentos depois do texto são descartados.
+ * Texto montado antes da chamada (template string) continua com quem escreve.
+ */
+function normalizarArgumentosDoLog(
+  argumentos: readonly unknown[],
+): [objeto: object, texto: string] | [texto: string] {
+  const [primeiro, segundo] = argumentos;
+  if (typeof primeiro === 'object' && primeiro !== null) {
+    return [objetoDoLog(primeiro), typeof segundo === 'string' ? segundo : TEXTO_SEM_MENSAGEM];
+  }
+  // `info(null, 'texto')` e `info(undefined, 'texto')`: o pino usa o segundo.
+  const texto = primeiro === undefined || primeiro === null ? segundo : primeiro;
+  return [typeof texto === 'string' ? texto : TEXTO_SEM_MENSAGEM];
 }
 
 /** 5xx e erro viram `error`; 4xx, `warn`; o resto, `info`. */
@@ -74,6 +162,12 @@ export function opcoesDoPino(ambiente: Pick<Ambiente, 'LOG_NIVEL'>): LoggerOptio
       log: (objeto) => redigirParaLog(objeto),
     },
     serializers: { req: serializarRequisicao, res: serializarResposta, err: serializarErro },
+    hooks: {
+      // Vale para a raiz e para todo filho (o pino guarda o gancho na raiz).
+      logMethod(argumentos, metodo) {
+        metodo.apply(this, normalizarArgumentosDoLog(argumentos) as Parameters<LogFn>);
+      },
+    },
   };
 }
 

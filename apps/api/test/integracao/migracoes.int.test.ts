@@ -5,8 +5,14 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   acessosIndevidos,
+  CatalogoForaDasRegras,
+  exigirCatalogoNasRegras,
   exigirSchemasFechados,
+  type ProblemaNoCatalogo,
+  problemasNoCatalogo,
+  SCHEMAS_FECHADOS,
   SchemasAbertosAoSupabase,
+  schemasDoBairrin,
 } from '../../src/compartilhado/infra/schemas-fechados.ts';
 import { URL_APP_TESTE, URL_MIGRACAO_TESTE } from './preparar-banco.ts';
 
@@ -124,12 +130,17 @@ describe('estrutura criada pela migração', () => {
     ]);
   });
 
-  it('não dá CREATE à aplicação em nenhum schema', async () => {
-    const { rows } = await dono.query<{ publico: boolean; compartilhado: boolean }>(
+  it('não dá CREATE à aplicação em nenhum schema nem USAGE em public (Seg-4)', async () => {
+    const { rows } = await dono.query<{
+      publico: boolean;
+      compartilhado: boolean;
+      usoDoPublico: boolean;
+    }>(
       `SELECT has_schema_privilege('bairrin_app', 'public', 'CREATE') AS publico,
-              has_schema_privilege('bairrin_app', 'compartilhado', 'CREATE') AS compartilhado`,
+              has_schema_privilege('bairrin_app', 'compartilhado', 'CREATE') AS compartilhado,
+              has_schema_privilege('bairrin_app', 'public', 'USAGE') AS "usoDoPublico"`,
     );
-    expect(rows[0]).toEqual({ publico: false, compartilhado: false });
+    expect(rows[0]).toEqual({ publico: false, compartilhado: false, usoDoPublico: false });
   });
 
   it('dá DML sem TRUNCATE à aplicação e, na auditoria e nas configurações, só SELECT e INSERT', async () => {
@@ -366,5 +377,352 @@ describe('schemas fechados aos papéis do Supabase (S26)', () => {
     );
     expect(acessos).toEqual([{ papel: 'bairrin_app', schema: 'compartilhado' }]);
     expect(new SchemasAbertosAoSupabase(acessos).message).toContain('bairrin_app em compartilhado');
+  });
+
+  it('schemasDoBairrin tem o piso e os schemas do dono, sem os do sistema (Seg-3)', async () => {
+    const schemas = await schemasDoBairrin(dono);
+    expect(schemas).toEqual(expect.arrayContaining([...SCHEMAS_FECHADOS]));
+    for (const doSistema of ['pg_catalog', 'pg_toast', 'information_schema']) {
+      expect(schemas).not.toContain(doSistema);
+    }
+    expect(schemas.some((schema) => schema.startsWith('pg_'))).toBe(false);
+  });
+
+  describe('schema novo, sem editar a lista (Seg-3)', () => {
+    const COM_USO = 'teste_seg3_com_uso';
+    const SEM_USO = 'teste_seg3_sem_uso';
+
+    beforeAll(async () => {
+      await dono.query(`CREATE SCHEMA ${COM_USO}`);
+      await dono.query(`CREATE SCHEMA ${SEM_USO}`);
+      await dono.query(`GRANT USAGE ON SCHEMA ${COM_USO} TO bairrin_app`);
+    });
+
+    afterAll(async () => {
+      await dono?.query(`DROP SCHEMA IF EXISTS ${COM_USO}, ${SEM_USO} CASCADE`);
+    });
+
+    it('o schema do dono com USAGE da aplicação aparece em acessosIndevidos sem lista', async () => {
+      const acessos = await acessosIndevidos(dono, ['bairrin_app']);
+      expect(acessos).toContainEqual({ papel: 'bairrin_app', schema: COM_USO });
+      expect(acessos).not.toContainEqual({ papel: 'bairrin_app', schema: SEM_USO });
+    });
+
+    it('entra pelo dono (conectado como dono) e pelo USAGE da aplicação (conectado como app)', async () => {
+      expect(await schemasDoBairrin(dono)).toEqual(expect.arrayContaining([COM_USO, SEM_USO]));
+      // `bairrin_app` não é dono de nada: só a regra do USAGE traz o schema.
+      const daAplicacao = await schemasDoBairrin(app);
+      expect(daAplicacao).toContain(COM_USO);
+      expect(daAplicacao).not.toContain(SEM_USO);
+    });
+  });
+
+  describe('schema com USAGE só por PUBLIC (Seg-3, QA)', () => {
+    const POR_PUBLIC = 'teste_seg3_por_public';
+
+    beforeAll(async () => {
+      await dono.query(`CREATE SCHEMA ${POR_PUBLIC}`);
+      await dono.query(`GRANT USAGE ON SCHEMA ${POR_PUBLIC} TO PUBLIC`);
+    });
+
+    afterAll(async () => {
+      await dono?.query(`DROP SCHEMA IF EXISTS ${POR_PUBLIC} CASCADE`);
+    });
+
+    it('a aplicação o enxerga por PUBLIC, então ele entra e é apontado, sem lista de schemas', async () => {
+      expect(await schemasDoBairrin(app)).toContain(POR_PUBLIC);
+      expect(await acessosIndevidos(dono, ['bairrin_app'])).toContainEqual({
+        papel: 'bairrin_app',
+        schema: POR_PUBLIC,
+      });
+    });
+  });
+});
+
+describe('catálogo conferido no release (S33)', () => {
+  const SCHEMA = 'teste_s33';
+
+  beforeAll(async () => {
+    // Do dono: entra em `schemasDoBairrin` sem lista.
+    await dono.query(`CREATE SCHEMA ${SCHEMA}`);
+  });
+
+  afterAll(async () => {
+    // O dono do schema apaga tudo dentro dele, inclusive o que é da aplicação.
+    await dono?.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+  });
+
+  /**
+   * Executa o SQL numa transação do dono, confere o catálogo dentro dela e
+   * desfaz tudo no fim, passe ou não.
+   */
+  async function problemasCom(
+    sql: readonly string[],
+    opcoes?: Parameters<typeof problemasNoCatalogo>[1],
+  ): Promise<ProblemaNoCatalogo[]> {
+    await dono.query('BEGIN');
+    try {
+      for (const comando of sql) await dono.query(comando);
+      return await problemasNoCatalogo(dono, opcoes);
+    } finally {
+      await dono.query('ROLLBACK');
+    }
+  }
+
+  /** Tabela com RLS e política só para a aplicação: dentro das regras. */
+  const tabelaCerta = (nome: string) => [
+    `CREATE TABLE ${SCHEMA}.${nome} (x int)`,
+    `ALTER TABLE ${SCHEMA}.${nome} ENABLE ROW LEVEL SECURITY`,
+  ];
+
+  it('passa no banco migrado (núcleo e pg-boss)', async () => {
+    expect(await problemasNoCatalogo(dono)).toEqual([]);
+    await expect(exigirCatalogoNasRegras(URL_MIGRACAO_TESTE)).resolves.toBeUndefined();
+  });
+
+  it('passa com tabela com RLS, política só para a aplicação e view com security_invoker', async () => {
+    expect(
+      await problemasCom([
+        ...tabelaCerta('certa'),
+        `CREATE POLICY aplicacao ON ${SCHEMA}.certa TO bairrin_app USING (true)`,
+        `GRANT SELECT ON ${SCHEMA}.certa TO bairrin_app`,
+        `CREATE VIEW ${SCHEMA}.vista WITH (security_invoker = on) AS SELECT x FROM ${SCHEMA}.certa`,
+      ]),
+    ).toEqual([]);
+  });
+
+  it('reprova relação, função e tipo cujo dono é a aplicação', async () => {
+    // O dono não pode passar objeto para `bairrin_app` (exigiria SET ROLE):
+    // a aplicação cria com um CREATE dado por engano, que é tirado antes da checagem.
+    await dono.query(`GRANT USAGE, CREATE ON SCHEMA ${SCHEMA} TO bairrin_app`);
+    try {
+      await app.query(`CREATE TABLE ${SCHEMA}.da_app (x int)`);
+      await app.query(`ALTER TABLE ${SCHEMA}.da_app ENABLE ROW LEVEL SECURITY`);
+      await app.query(
+        `CREATE FUNCTION ${SCHEMA}.funcao_da_app() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+      );
+      await app.query(`CREATE TYPE ${SCHEMA}.tipo_da_app AS ENUM ('a')`);
+      await dono.query(`REVOKE CREATE ON SCHEMA ${SCHEMA} FROM bairrin_app`);
+      const problemas = await problemasNoCatalogo(dono);
+      expect(problemas).toEqual([
+        { regra: 'dono-e-a-aplicacao', objeto: `função ${SCHEMA}.funcao_da_app()` },
+        { regra: 'dono-e-a-aplicacao', objeto: `relação ${SCHEMA}.da_app` },
+        { regra: 'dono-e-a-aplicacao', objeto: `tipo ${SCHEMA}.tipo_da_app` },
+      ]);
+      await expect(exigirCatalogoNasRegras(URL_MIGRACAO_TESTE)).rejects.toBeInstanceOf(
+        CatalogoForaDasRegras,
+      );
+    } finally {
+      await app.query(`DROP TABLE IF EXISTS ${SCHEMA}.da_app`);
+      await app.query(`DROP FUNCTION IF EXISTS ${SCHEMA}.funcao_da_app()`);
+      await app.query(`DROP TYPE IF EXISTS ${SCHEMA}.tipo_da_app`);
+      await dono.query(`REVOKE ALL ON SCHEMA ${SCHEMA} FROM bairrin_app`);
+    }
+  });
+
+  it('reprova CREATE da aplicação num schema', async () => {
+    expect(await problemasCom([`GRANT CREATE ON SCHEMA ${SCHEMA} TO bairrin_app`])).toEqual([
+      { regra: 'create-da-aplicacao', objeto: `schema ${SCHEMA}` },
+    ]);
+  });
+
+  it('reprova tabela comum e particionada sem RLS', async () => {
+    expect(
+      await problemasCom([
+        `CREATE TABLE ${SCHEMA}.sem_rls (x int)`,
+        `CREATE TABLE ${SCHEMA}.particionada (x int) PARTITION BY RANGE (x)`,
+      ]),
+    ).toEqual([
+      { regra: 'tabela-sem-rls', objeto: `${SCHEMA}.particionada` },
+      { regra: 'tabela-sem-rls', objeto: `${SCHEMA}.sem_rls` },
+    ]);
+  });
+
+  it('reprova política para PUBLIC, explícita ou sem TO', async () => {
+    expect(
+      await problemasCom([
+        ...tabelaCerta('aberta'),
+        `CREATE POLICY para_public ON ${SCHEMA}.aberta TO PUBLIC USING (true)`,
+        `CREATE POLICY sem_to ON ${SCHEMA}.aberta USING (true)`,
+        `CREATE POLICY varios ON ${SCHEMA}.aberta TO bairrin_app, PUBLIC USING (true)`,
+      ]),
+    ).toEqual([
+      { regra: 'politica-para-papel-proibido', objeto: `${SCHEMA}.aberta (para_public)` },
+      { regra: 'politica-para-papel-proibido', objeto: `${SCHEMA}.aberta (sem_to)` },
+      { regra: 'politica-para-papel-proibido', objeto: `${SCHEMA}.aberta (varios)` },
+    ]);
+  });
+
+  it('reprova política para papel proibido e ignora papel que não existe', async () => {
+    // `bairrin_app` faz o papel de um `anon` (que não existe no Postgres local).
+    const sql = [
+      ...tabelaCerta('para_anon'),
+      `CREATE POLICY aplicacao ON ${SCHEMA}.para_anon TO bairrin_app USING (true)`,
+    ];
+    expect(
+      // Só o schema do teste: as políticas do núcleo também são para `bairrin_app`.
+      await problemasCom(sql, {
+        schemas: [SCHEMA],
+        papeisForaDasPoliticas: ['bairrin_app', 'papel_que_nao_existe'],
+      }),
+    ).toEqual([
+      { regra: 'politica-para-papel-proibido', objeto: `${SCHEMA}.para_anon (aplicacao)` },
+    ]);
+    expect(await problemasCom(sql)).toEqual([]);
+  });
+
+  it.each([
+    [
+      'desligada',
+      'DISABLE TRIGGER auditoria_sem_truncate',
+      'auditoria_sem_truncate com tgenabled D',
+    ],
+    [
+      'só em réplica',
+      'ENABLE REPLICA TRIGGER auditoria_sem_update_delete',
+      'auditoria_sem_update_delete com tgenabled R',
+    ],
+    [
+      'sempre',
+      'ENABLE ALWAYS TRIGGER auditoria_sem_truncate',
+      'auditoria_sem_truncate com tgenabled A',
+    ],
+  ])('reprova trigger da auditoria %s', async (_caso, alteracao, objeto) => {
+    expect(await problemasCom([`ALTER TABLE compartilhado.auditoria ${alteracao}`])).toEqual([
+      { regra: 'trigger-da-auditoria', objeto: `compartilhado.auditoria (${objeto})` },
+    ]);
+  });
+
+  it('reprova trigger da auditoria ausente', async () => {
+    expect(
+      await problemasCom(['DROP TRIGGER auditoria_sem_update_delete ON compartilhado.auditoria']),
+    ).toEqual([
+      {
+        regra: 'trigger-da-auditoria',
+        objeto: 'compartilhado.auditoria (auditoria_sem_update_delete ausente)',
+      },
+    ]);
+  });
+
+  it('reprova regra de reescrita em tabela e em view, mas não o `_RETURN` da view', async () => {
+    expect(
+      await problemasCom([
+        ...tabelaCerta('com_regra'),
+        `CREATE RULE nada AS ON INSERT TO ${SCHEMA}.com_regra DO INSTEAD NOTHING`,
+        `CREATE VIEW ${SCHEMA}.vista WITH (security_invoker) AS SELECT x FROM ${SCHEMA}.com_regra`,
+        `CREATE RULE na_vista AS ON INSERT TO ${SCHEMA}.vista DO INSTEAD NOTHING`,
+      ]),
+    ).toEqual([
+      { regra: 'regra-de-reescrita', objeto: `${SCHEMA}.com_regra (nada)` },
+      { regra: 'regra-de-reescrita', objeto: `${SCHEMA}.vista (na_vista)` },
+    ]);
+  });
+
+  it('reprova WITH GRANT OPTION para a aplicação em tabela, coluna, schema e privilégio padrão (S34)', async () => {
+    expect(
+      await problemasCom([
+        ...tabelaCerta('repassavel'),
+        `GRANT SELECT ON ${SCHEMA}.repassavel TO bairrin_app WITH GRANT OPTION`,
+        ...tabelaCerta('coluna'),
+        `GRANT UPDATE (x) ON ${SCHEMA}.coluna TO bairrin_app WITH GRANT OPTION`,
+        `GRANT USAGE ON SCHEMA ${SCHEMA} TO bairrin_app WITH GRANT OPTION`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT SELECT ON TABLES TO bairrin_app WITH GRANT OPTION`,
+      ]),
+    ).toEqual([
+      { regra: 'grant-option-da-aplicacao', objeto: `coluna ${SCHEMA}.coluna.x` },
+      { regra: 'grant-option-da-aplicacao', objeto: 'privilégio padrão de bairrin_migracao' },
+      { regra: 'grant-option-da-aplicacao', objeto: `relação ${SCHEMA}.repassavel` },
+      { regra: 'grant-option-da-aplicacao', objeto: `schema ${SCHEMA}` },
+    ]);
+  });
+
+  it('reprova WITH GRANT OPTION para a aplicação em função e tipo (S34, QA)', async () => {
+    expect(
+      await problemasCom([
+        `CREATE FUNCTION ${SCHEMA}.repassavel() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+        `GRANT EXECUTE ON FUNCTION ${SCHEMA}.repassavel() TO bairrin_app WITH GRANT OPTION`,
+        `CREATE TYPE ${SCHEMA}.repassavel AS ENUM ('a')`,
+        `GRANT USAGE ON TYPE ${SCHEMA}.repassavel TO bairrin_app WITH GRANT OPTION`,
+      ]),
+    ).toEqual([
+      { regra: 'grant-option-da-aplicacao', objeto: `função ${SCHEMA}.repassavel()` },
+      { regra: 'grant-option-da-aplicacao', objeto: `tipo ${SCHEMA}.repassavel` },
+    ]);
+  });
+
+  it('o GRANT sem GRANT OPTION para a aplicação não é apontado', async () => {
+    expect(
+      await problemasCom([
+        ...tabelaCerta('sem_repasse'),
+        `GRANT SELECT ON ${SCHEMA}.sem_repasse TO bairrin_app`,
+        `CREATE FUNCTION ${SCHEMA}.sem_repasse() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+        `GRANT EXECUTE ON FUNCTION ${SCHEMA}.sem_repasse() TO bairrin_app`,
+        `GRANT USAGE ON SCHEMA ${SCHEMA} TO bairrin_app`,
+      ]),
+    ).toEqual([]);
+  });
+
+  it('reprova view sem security_invoker ou com ele desligado', async () => {
+    expect(
+      await problemasCom([
+        `CREATE VIEW ${SCHEMA}.sem_invoker AS SELECT 1 AS x`,
+        `CREATE VIEW ${SCHEMA}.invoker_desligado WITH (security_invoker = false) AS SELECT 1 AS x`,
+      ]),
+    ).toEqual([
+      { regra: 'view-sem-security-invoker', objeto: `${SCHEMA}.invoker_desligado` },
+      { regra: 'view-sem-security-invoker', objeto: `${SCHEMA}.sem_invoker` },
+    ]);
+  });
+
+  describe('o que só um superusuário cria (QA)', () => {
+    // O papel de migração não é dono do banco nem membro de `bairrin_app`: schema da
+    // aplicação e GRANT OPTION em banco só se montam como `postgres` (valores locais do
+    // `infra/docker-compose.yml`, como em `preparar-banco.ts`).
+    const URL_ADMIN_TESTE =
+      process.env['DATABASE_URL_ADMIN_TESTE'] ??
+      'postgresql://postgres:dev_postgres_somente_local@127.0.0.1:5433/bairrin_teste';
+    let admin: pg.Client;
+
+    beforeAll(async () => {
+      admin = new pg.Client({ connectionString: URL_ADMIN_TESTE });
+      await admin.connect();
+    });
+
+    afterAll(async () => {
+      await admin?.end();
+    });
+
+    async function problemasComoAdmin(sql: readonly string[]): Promise<ProblemaNoCatalogo[]> {
+      await admin.query('BEGIN');
+      try {
+        for (const comando of sql) await admin.query(comando);
+        return await problemasNoCatalogo(admin, { schemas: [SCHEMA] });
+      } finally {
+        await admin.query('ROLLBACK');
+      }
+    }
+
+    it('reprova schema cujo dono é a aplicação', async () => {
+      expect(await problemasComoAdmin([`ALTER SCHEMA ${SCHEMA} OWNER TO bairrin_app`])).toEqual([
+        { regra: 'create-da-aplicacao', objeto: `schema ${SCHEMA}` },
+        { regra: 'dono-e-a-aplicacao', objeto: `schema ${SCHEMA}` },
+      ]);
+    });
+
+    it('reprova WITH GRANT OPTION para a aplicação no banco', async () => {
+      expect(
+        await problemasComoAdmin([
+          'GRANT CONNECT ON DATABASE bairrin_teste TO bairrin_app WITH GRANT OPTION',
+        ]),
+      ).toEqual([{ regra: 'grant-option-da-aplicacao', objeto: 'banco bairrin_teste' }]);
+    });
+  });
+
+  it('a mensagem do erro do release cita regra e objeto', () => {
+    const erro = new CatalogoForaDasRegras([
+      { regra: 'tabela-sem-rls', objeto: `${SCHEMA}.sem_rls` },
+    ]);
+    expect(erro.message).toContain(`tabela-sem-rls: ${SCHEMA}.sem_rls`);
+    expect(erro.name).toBe('CatalogoForaDasRegras');
   });
 });

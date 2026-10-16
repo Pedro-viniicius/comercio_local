@@ -16,4 +16,6 @@ Conferido em 2026-10-16 (etapa 12 do 01a, `.dependency-cruiser.cjs`, `apps/api/t
 
 - Regras do núcleo: "adaptador do núcleo" = `compartilhado/(infra|http|log|observabilidade|config|saude)/`, `*.adaptador.ts` e `compartilhado.module.ts`; portas puras ficam FORA dessas pastas (`transacao/`, `tempo/`, `eventos/publicador.ts`...), sem `pathNot`.
 
+- Regra `producao-nao-importa-test` (01b, 0b): fakes ficam em `apps/api/test/fakes/<contexto>/`; só `*.test.ts` de `src/` os importa. Fixture de teste pode viver em `fixtures/apps/api/test/...` (o `exclude` só pega `^apps/api/test/fronteiras/fixtures/` da raiz real). Fixture `*.test.ts` dentro das fixtures seria coletada pelo Vitest: prove exceções pela árvore real.
+
 **How to apply:** nova regra de fronteira, novo módulo em `modulos/`, subcaminho `@bairrin/contratos/validadores` (remover o `@ts-expect-error` da fixture `usa-validadores-nao-resolvido.ts`).

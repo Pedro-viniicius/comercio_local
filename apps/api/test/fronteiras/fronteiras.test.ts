@@ -5,8 +5,9 @@
 // Roda a CLI do dependency-cruiser (o mesmo caminho do `pnpm deps:verificar`),
 // uma vez nas fixtures e uma vez na árvore real, em paralelo.
 import { execFile } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -90,6 +91,8 @@ const esperadas: [regra: string, de: string][] = [
   // Apps e pacotes importando apps/api.
   ['fora-da-api-nao-importa-api', 'apps/consumidor/src/viola-api.ts'],
   ['fora-da-api-nao-importa-api', 'packages/comum/src/viola-api.ts'],
+  // Código de produção importando fake de teste (Q7).
+  ['producao-nao-importa-test', `${M}/a/aplicacao/viola-fake-de-teste.ts`],
 ];
 
 describe('fronteiras de camadas: fixtures', () => {
@@ -143,6 +146,31 @@ describe('fronteiras de camadas: fixtures', () => {
 describe('fronteiras de camadas: árvore real', () => {
   it('não tem violação', () => {
     expect(real.summary.violations).toEqual([]);
+  });
+
+  it('fakes ficam em apps/api/test: nenhum arquivo *falso* em apps/api/src (Q7)', () => {
+    const fonte = join(raiz, 'apps/api/src');
+    const falsos = readdirSync(fonte, { recursive: true, encoding: 'utf8' }).filter((caminho) =>
+      /falso/i.test(basename(caminho)),
+    );
+    expect(falsos).toEqual([]);
+  });
+
+  it('fakes ficam em apps/api/test: nenhum arquivo fake, mock ou stub em apps/api/src (Q7, QA)', () => {
+    // O nome em português é o do teste acima; este cobre os nomes em inglês, que a regra de
+    // importação não pega (um fake de src/ que não importa nada de test/ passa por ela).
+    const fonte = join(raiz, 'apps/api/src');
+    const suspeitos = readdirSync(fonte, { recursive: true, encoding: 'utf8' }).filter((caminho) =>
+      /(^|[^a-z])(fake|mock|stub)s?([^a-z]|$)/i.test(basename(caminho)),
+    );
+    expect(suspeitos).toEqual([]);
+  });
+
+  it('o teste do SMTP importa o fake de test/fakes sem violar producao-nao-importa-test (Q7)', () => {
+    const teste = real.modules.find((m) => m.source === `${N}/infra/smtp.adaptador.test.ts`);
+    expect(teste?.dependencies.map((d) => d.resolved)).toContain(
+      'apps/api/test/fakes/compartilhado/enviador-de-email-falso.ts',
+    );
   });
 
   it('analisa a API e os pacotes, resolvendo @bairrin/* pelo código-fonte, sem as fixtures', () => {

@@ -2,7 +2,7 @@
 // real contra o Mailpit está em test/integracao/email-smtp.int.test.ts.
 import { describe, expect, it } from 'vitest';
 import { FalhaNoEnvioDeEmail } from '../email/enviador-de-email.ts';
-import { EnviadorDeEmailFalso } from '../email/enviador-falso.ts';
+import { EnviadorDeEmailFalso } from '../../../test/fakes/compartilhado/enviador-de-email-falso.ts';
 import { falhaDoNodemailer } from './smtp.adaptador.ts';
 
 describe('falhaDoNodemailer', () => {

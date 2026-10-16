@@ -276,6 +276,20 @@ ALTER TABLE pedidos.itens DISABLE ROW LEVEL SECURITY;`;
   });
 });
 
+/**
+ * `comando` dentro de `niveis` blocos `DO ... EXECUTE '...'`, um dentro do texto do outro, cada
+ * um com o seu delimitador (o corpo de fora termina no primeiro delimitador igual).
+ */
+function aninhar(comando, niveis) {
+  let sql = comando;
+  for (let nivel = 1; nivel <= niveis; nivel += 1) {
+    sql = `DO $n${nivel}$ BEGIN EXECUTE '${sql.replace(/'/g, "''")}'; END $n${nivel}$`;
+  }
+  return `${sql};`;
+}
+
+const DESLIGA_AUDITORIA = 'ALTER TABLE compartilhado.auditoria DISABLE TRIGGER ALL';
+
 describe('RLS, triggers, privilégios, funções e extensões (S27)', () => {
   /** Reprovam em qualquer pasta, inclusive `_destrutiva` com guarda. */
   const recusados = [
@@ -400,6 +414,387 @@ describe('RLS, triggers, privilégios, funções e extensões (S27)', () => {
       'SELECT 1 AS id INTO UNLOGGED TABLE pedidos.copia;',
       /^tabela "pedidos\.copia" criada sem/,
     ],
+    // Q6 (1): EXECUTE só com SQL que dá para conferir.
+    [
+      'EXECUTE concatenado',
+      "DO $$ DECLARE t text := 'itens'; BEGIN EXECUTE 'ANALYZE pedidos.' || t; END $$;",
+      /^EXECUTE com SQL concatenado/,
+    ],
+    [
+      'EXECUTE de variável',
+      "DO $$ DECLARE c text := 'SELECT 1'; BEGIN EXECUTE c; END $$;",
+      /^EXECUTE com argumento que não é literal/,
+    ],
+    [
+      'EXECUTE de format concatenado',
+      "DO $$ BEGIN EXECUTE format('ANALYZE %I', 'itens') || ' '; END $$;",
+      /^EXECUTE com SQL concatenado/,
+    ],
+    [
+      'EXECUTE de format com modelo variável',
+      "DO $$ DECLARE c text := 'ANALYZE %I'; BEGIN EXECUTE format(c, 'itens'); END $$;",
+      /^EXECUTE com argumento que não é literal/,
+    ],
+    [
+      'EXECUTE de literais adjacentes',
+      "DO $$ BEGIN EXECUTE 'ANALYZE '\n'pedidos.itens'; END $$;",
+      /^EXECUTE com argumento que não é literal/,
+    ],
+    [
+      'FOR ... IN EXECUTE de variável',
+      "DO $$ DECLARE r record; c text := 'SELECT 1'; BEGIN FOR r IN EXECUTE c LOOP END LOOP; END $$;",
+      /^EXECUTE com argumento que não é literal/,
+    ],
+    [
+      'EXECUTE de variável dentro de SQL dinâmico',
+      "DO $$ BEGIN EXECUTE 'DO $i$ DECLARE c text := ''SELECT 1''; BEGIN EXECUTE c; END $i$'; END $$;",
+      /^EXECUTE com argumento que não é literal.*\(em SQL dinâmico\)$/,
+    ],
+    // Q6 (2): privilégio padrão concedido.
+    [
+      'ALTER DEFAULT PRIVILEGES ... GRANT',
+      'ALTER DEFAULT PRIVILEGES IN SCHEMA pedidos GRANT SELECT ON TABLES TO bairrin_app;',
+      /^ALTER DEFAULT PRIVILEGES \.\.\. GRANT/,
+    ],
+    [
+      'ALTER DEFAULT PRIVILEGES FOR ROLE ... GRANT EXECUTE',
+      'alter default privileges for role bairrin_migracao grant execute on functions to bairrin_app;',
+      /^ALTER DEFAULT PRIVILEGES \.\.\. GRANT/,
+    ],
+    [
+      'ALTER DEFAULT PRIVILEGES ... GRANT dinâmico',
+      "DO $$ BEGIN EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA pedidos GRANT SELECT ON TABLES TO bairrin_app'; END $$;",
+      /^ALTER DEFAULT PRIVILEGES \.\.\. GRANT.*\(em SQL dinâmico\)$/,
+    ],
+    // Q6 e Seg-2 (3): política sempre restrita a um papel que não é do Supabase.
+    [
+      'CREATE POLICY sem TO',
+      'CREATE POLICY p ON pedidos.itens USING (true);',
+      /^CREATE POLICY sem TO/,
+    ],
+    [
+      'CREATE POLICY sem TO, com TO só em texto',
+      "CREATE POLICY p ON pedidos.itens FOR SELECT USING (nome = 'TO bairrin_app');",
+      /^CREATE POLICY sem TO/,
+    ],
+    [
+      'CREATE POLICY para PUBLIC',
+      'CREATE POLICY p ON pedidos.itens FOR SELECT TO PUBLIC USING (true);',
+      /^CREATE POLICY para public/,
+    ],
+    [
+      'CREATE POLICY para anon',
+      'CREATE POLICY "p" ON pedidos.itens AS PERMISSIVE FOR ALL TO anon USING (true) WITH CHECK (true);',
+      /^CREATE POLICY para anon/,
+    ],
+    [
+      'CREATE POLICY para "authenticated" em lista',
+      'CREATE POLICY p ON pedidos.itens TO bairrin_app, "authenticated" USING (true);',
+      /^CREATE POLICY para authenticated/,
+    ],
+    [
+      'CREATE POLICY para service_role',
+      'CREATE POLICY p ON pedidos.itens FOR INSERT TO service_role WITH CHECK (true);',
+      /^CREATE POLICY para service_role/,
+    ],
+    [
+      'CREATE POLICY sem TO dinâmico',
+      "DO $$ BEGIN EXECUTE 'CREATE POLICY p ON pedidos.itens USING (true)'; END $$;",
+      /^CREATE POLICY sem TO.*\(em SQL dinâmico\)$/,
+    ],
+    // Q6 (4): papéis e atributos de papel.
+    ['CREATE ROLE', 'CREATE ROLE intruso LOGIN;', /^CREATE ROLE/],
+    ['CREATE USER', 'CREATE USER intruso;', /^CREATE USER/],
+    ['ALTER GROUP', 'ALTER GROUP g ADD USER bairrin_app;', /^ALTER GROUP/],
+    ['BYPASSRLS', 'ALTER ROLE bairrin_app BYPASSRLS;', /^BYPASSRLS/],
+    ['SUPERUSER', 'ALTER USER bairrin_app WITH SUPERUSER;', /^SUPERUSER/],
+    ['CREATEROLE', 'create role intruso createrole;', /^CREATEROLE/],
+    [
+      'BYPASSRLS dinâmico',
+      "DO $$ BEGIN EXECUTE 'ALTER ROLE bairrin_app BYPASSRLS'; END $$;",
+      /^BYPASSRLS.*\(em SQL dinâmico\)$/,
+    ],
+    ['GRANT de papel', 'GRANT bairrin_migracao TO bairrin_app;', /^GRANT de papel sem ON/],
+    [
+      'GRANT de papel do Postgres com ADMIN OPTION',
+      'GRANT pg_read_server_files, "pg_write_server_files" TO bairrin_app WITH ADMIN OPTION;',
+      /^GRANT de papel sem ON/,
+    ],
+    [
+      'GRANT de papel dinâmico',
+      "DO $$ BEGIN EXECUTE 'GRANT bairrin_migracao TO bairrin_app'; END $$;",
+      /^GRANT de papel sem ON.*\(em SQL dinâmico\)$/,
+    ],
+    // Q6 (5): troca de papel e RLS da sessão.
+    ['SET ROLE', 'SET ROLE bairrin_migracao;', /^troca de papel \(SET ROLE\)/],
+    ['SET LOCAL ROLE', 'set local role postgres;', /^troca de papel \(SET ROLE\)/],
+    [
+      'SET SESSION AUTHORIZATION',
+      'SET SESSION AUTHORIZATION postgres;',
+      /^troca de papel \(SET SESSION AUTHORIZATION\)/,
+    ],
+    [
+      'set_config de role',
+      "SELECT set_config('role', 'postgres', true);",
+      /^troca de papel \(set_config\)/,
+    ],
+    [
+      'SET ROLE dinâmico',
+      "DO $$ BEGIN EXECUTE 'SET ROLE postgres'; END $$;",
+      /^troca de papel \(SET ROLE\).*\(em SQL dinâmico\)$/,
+    ],
+    ['SET row_security', 'SET row_security = off;', /^row_security/],
+    [
+      'row_security por set_config',
+      "SELECT set_config('row_security', 'off', false);",
+      /^row_security/,
+    ],
+    // Q6 (6): comando do sistema operacional no servidor.
+    ['COPY FROM PROGRAM', "COPY pedidos.itens FROM PROGRAM 'curl x';", /^COPY \.\.\. PROGRAM/],
+    ['COPY TO PROGRAM', "COPY (SELECT 1) TO PROGRAM 'sh';", /^COPY \.\.\. PROGRAM/],
+    [
+      'COPY PROGRAM dinâmico',
+      "DO $$ BEGIN EXECUTE 'COPY pedidos.itens TO PROGRAM ''sh'''; END $$;",
+      /^COPY \.\.\. PROGRAM.*\(em SQL dinâmico\)$/,
+    ],
+    // Seg-2 (7): dono só o papel de migração.
+    [
+      'OWNER TO bairrin_app',
+      'ALTER TABLE pedidos.itens OWNER TO bairrin_app;',
+      /^OWNER TO bairrin_app/,
+    ],
+    ['OWNER TO postgres', 'ALTER SCHEMA pedidos OWNER TO postgres;', /^OWNER TO postgres/],
+    [
+      'OWNER TO "service_role"',
+      'ALTER FUNCTION pedidos.f() OWNER TO "service_role";',
+      /^OWNER TO service_role/,
+    ],
+    [
+      'OWNER TO SESSION_USER',
+      'ALTER TABLE pedidos.itens OWNER TO SESSION_USER;',
+      /^OWNER TO session_user/,
+    ],
+    [
+      'OWNER TO dinâmico',
+      "DO $$ BEGIN EXECUTE format('ALTER TABLE %I.itens OWNER TO bairrin_app', 'pedidos'); END $$;",
+      /^OWNER TO bairrin_app.*\(em SQL dinâmico\)$/,
+    ],
+    // S33: o corpo $tag$ só é código depois de DO ou AS, no topo; aspa ou -- dentro de um
+    // $tag$ que o Postgres lê como texto não escondem mais o comando seguinte.
+    [
+      '$tag$ como texto no topo, com aspa',
+      `SELECT $q$'$q$; ${DESLIGA_AUDITORIA}; SELECT $q$'$q$;`,
+      /^\$tag\$ usado como texto \(S33\)/,
+    ],
+    [
+      '$tag$ como texto no topo: o comando escondido também reprova',
+      `SELECT $q$'$q$; ${DESLIGA_AUDITORIA}; SELECT $q$'$q$;`,
+      /^trigger desligada \(DISABLE TRIGGER\)/,
+    ],
+    [
+      '$tag$ em DO, com aspa',
+      `DO $$ BEGIN PERFORM $q$'$q$; ${DESLIGA_AUDITORIA}; PERFORM $q$'$q$; END $$;`,
+      /^\$tag\$ dentro de outro corpo \$tag\$ \(S33\)/,
+    ],
+    [
+      '$tag$ em DO, com --',
+      `DO $$ BEGIN PERFORM $q$--$q$; ${DESLIGA_AUDITORIA};\nEND $$;`,
+      /^\$tag\$ dentro de outro corpo \$tag\$ \(S33\)/,
+    ],
+    [
+      '-- no fim do corpo de DO não esconde o comando depois do delimitador',
+      `DO $$ BEGIN NULL; END -- $$; ${DESLIGA_AUDITORIA}; DO $$ BEGIN NULL; END\n$$;`,
+      /^trigger desligada \(DISABLE TRIGGER\)/,
+    ],
+    [
+      'texto que passa do fim do corpo de DO',
+      `DO $$ BEGIN RAISE NOTICE '$$; ${DESLIGA_AUDITORIA}; SELECT '$$';`,
+      /^texto, identificador entre aspas ou comentário \/\* \*\/ passa do fim do corpo/,
+    ],
+    [
+      'comentário /* */ que passa do fim do corpo de DO',
+      `DO $$ BEGIN NULL; END /* $$; ${DESLIGA_AUDITORIA}; -- */`,
+      /^trigger desligada \(DISABLE TRIGGER\)/,
+    ],
+    [
+      '$tag$ com letra fora do ASCII como texto',
+      `SELECT $ção$'$ção$; ${DESLIGA_AUDITORIA}; SELECT $ção$'$ção$;`,
+      /^\$tag\$ usado como texto \(S33\)/,
+    ],
+    [
+      'EXECUTE $q$...$q$ dentro de DO',
+      'DO $$ BEGIN EXECUTE $q$ANALYZE pedidos.itens$q$; END $$;',
+      /^\$tag\$ dentro de outro corpo \$tag\$ \(S33\)/,
+    ],
+    [
+      'COMMENT ... IS $q$...$q$',
+      'COMMENT ON TABLE pedidos.itens IS $q$descrição$q$;',
+      /^\$tag\$ usado como texto \(S33\)/,
+    ],
+    [
+      '$tag$ como texto em SQL dinâmico',
+      "DO $$ BEGIN EXECUTE 'SELECT $q$x$q$'; END $$;",
+      /^\$tag\$ usado como texto .*\(em SQL dinâmico\)$/,
+    ],
+    // S34, R14 e R16: comandos equivalentes aos já recusados.
+    [
+      'CREATE SCHEMA ... AUTHORIZATION bairrin_app',
+      'CREATE SCHEMA IF NOT EXISTS identidade AUTHORIZATION bairrin_app;',
+      /^CREATE SCHEMA \.\.\. AUTHORIZATION bairrin_app \(S34\)/,
+    ],
+    [
+      'CREATE SCHEMA AUTHORIZATION sem nome do schema',
+      'CREATE SCHEMA AUTHORIZATION "postgres";',
+      /^CREATE SCHEMA \.\.\. AUTHORIZATION postgres/,
+    ],
+    [
+      'CREATE SCHEMA ... AUTHORIZATION dinâmico',
+      "DO $$ BEGIN EXECUTE 'CREATE SCHEMA s AUTHORIZATION bairrin_app'; END $$;",
+      /^CREATE SCHEMA \.\.\. AUTHORIZATION bairrin_app.*\(em SQL dinâmico\)$/,
+    ],
+    [
+      'GRANT CREATE ON SCHEMA',
+      'GRANT USAGE, CREATE ON SCHEMA pedidos TO bairrin_app;',
+      /^GRANT CREATE \(ou ALL\) em SCHEMA para bairrin_app \(S34\)/,
+    ],
+    [
+      'GRANT ALL ON SCHEMA',
+      'GRANT ALL PRIVILEGES ON SCHEMA "pedidos" TO "bairrin_app";',
+      /^GRANT CREATE \(ou ALL\) em SCHEMA para bairrin_app/,
+    ],
+    [
+      'GRANT CREATE ON DATABASE',
+      'GRANT CREATE ON DATABASE postgres TO bairrin_app;',
+      /^GRANT CREATE \(ou ALL\) em DATABASE para bairrin_app/,
+    ],
+    [
+      'format com %s',
+      "DO $$ DECLARE c text := 'pedidos.itens'; BEGIN EXECUTE format('ANALYZE %s', c); END $$;",
+      /^EXECUTE de format com especificador que não é %I, %L nem %% \(S34\)/,
+    ],
+    [
+      'format com %1$s',
+      "DO $$ DECLARE c text := 'x'; BEGIN EXECUTE format('ANALYZE %1$I.%2$s', 'pedidos', c); END $$;",
+      /^EXECUTE de format com especificador/,
+    ],
+    [
+      "format com %s escrito por escape em E'...'",
+      "DO $$ DECLARE c text := 'x'; BEGIN EXECUTE format(E'ANALYZE \\x25s', c); END $$;",
+      /^EXECUTE de format com especificador/,
+    ],
+    [
+      'format com largura (%-10I)',
+      "DO $$ BEGIN EXECUTE format('ANALYZE %-10I', 'itens'); END $$;",
+      /^EXECUTE de format com especificador/,
+    ],
+    [
+      'format com %s em SQL dinâmico',
+      "DO $$ BEGIN EXECUTE 'DO $i$ BEGIN EXECUTE format(''ANALYZE %s'', 1); END $i$'; END $$;",
+      /^EXECUTE de format com especificador.*\(em SQL dinâmico\)$/,
+    ],
+    [
+      'ALTER POLICY ... TO PUBLIC',
+      'ALTER POLICY p ON pedidos.itens TO PUBLIC;',
+      /^ALTER POLICY para public/,
+    ],
+    [
+      'ALTER POLICY ... TO anon, com USING',
+      'ALTER POLICY "p" ON pedidos.itens TO bairrin_app, anon USING (true);',
+      /^ALTER POLICY para anon/,
+    ],
+    [
+      'ALTER POLICY dinâmico',
+      "DO $$ BEGIN EXECUTE 'ALTER POLICY p ON pedidos.itens TO authenticated'; END $$;",
+      /^ALTER POLICY para authenticated.*\(em SQL dinâmico\)$/,
+    ],
+    [
+      'CREATE POLICY para postgres',
+      'CREATE POLICY p ON pedidos.itens TO postgres USING (true);',
+      /^CREATE POLICY para postgres/,
+    ],
+    [
+      'CREATE POLICY para supabase_auth_admin',
+      'CREATE POLICY p ON pedidos.itens TO supabase_auth_admin USING (true);',
+      /^CREATE POLICY para supabase_auth_admin/,
+    ],
+    [
+      'CREATE POLICY para supabase_admin',
+      'CREATE POLICY p ON pedidos.itens FOR SELECT TO bairrin_app, supabase_admin USING (true);',
+      /^CREATE POLICY para supabase_admin/,
+    ],
+    [
+      'CREATE POLICY para "dashboard_user"',
+      'CREATE POLICY p ON pedidos.itens TO "dashboard_user" USING (true);',
+      /^CREATE POLICY para dashboard_user/,
+    ],
+    [
+      'REASSIGN OWNED BY ... TO bairrin_app',
+      'REASSIGN OWNED BY bairrin_migracao TO bairrin_app;',
+      /^REASSIGN OWNED BY \.\.\. TO bairrin_app \(S34\)/,
+    ],
+    [
+      'REASSIGN OWNED BY ... TO postgres dinâmico',
+      "DO $$ BEGIN EXECUTE 'REASSIGN OWNED BY bairrin_migracao TO postgres'; END $$;",
+      /^REASSIGN OWNED BY \.\.\. TO postgres.*\(em SQL dinâmico\)$/,
+    ],
+    [
+      'GRANT ... WITH GRANT OPTION',
+      'GRANT SELECT ON pedidos.itens TO bairrin_app WITH GRANT OPTION;',
+      /^GRANT \.\.\. WITH GRANT OPTION \(S34\)/,
+    ],
+    [
+      'GRANT ... WITH GRANT OPTION dinâmico',
+      "DO $$ BEGIN EXECUTE 'GRANT USAGE ON SCHEMA pedidos TO bairrin_app WITH GRANT OPTION'; END $$;",
+      /^GRANT \.\.\. WITH GRANT OPTION.*\(em SQL dinâmico\)$/,
+    ],
+    [
+      'CREATE RULE',
+      'CREATE RULE r AS ON UPDATE TO compartilhado.auditoria DO INSTEAD NOTHING;',
+      /^CREATE RULE \(S34\)/,
+    ],
+    [
+      'CREATE OR REPLACE RULE dinâmico',
+      "DO $$ BEGIN EXECUTE 'CREATE OR REPLACE RULE r AS ON DELETE TO compartilhado.auditoria DO INSTEAD NOTHING'; END $$;",
+      /^CREATE RULE.*\(em SQL dinâmico\)$/,
+    ],
+    [
+      'SQL dinâmico com 4 níveis ainda é conferido',
+      aninhar('SET ROLE postgres', 4),
+      /^troca de papel \(SET ROLE\).*\(em SQL dinâmico\)$/,
+    ],
+    [
+      'SQL dinâmico com mais de 4 níveis',
+      aninhar('SET ROLE postgres', 5),
+      /^SQL dinâmico com mais de 4 níveis/,
+    ],
+    // R15: troca de papel pelo nome do parâmetro, entre aspas, e como opção de função ou do banco.
+    ['SET "role" TO', 'SET "role" TO bairrin_app;', /^troca de papel \(SET ROLE\)/],
+    ['SET SESSION "ROLE" =', 'SET SESSION "ROLE" = postgres;', /^troca de papel \(SET ROLE\)/],
+    [
+      'SET session_authorization TO',
+      'SET session_authorization TO postgres;',
+      /^troca de papel \(SET SESSION AUTHORIZATION\)/,
+    ],
+    [
+      'SET ROLE no início do corpo de função em SQL',
+      'CREATE FUNCTION pedidos.f() RETURNS int LANGUAGE sql AS $$ SET ROLE postgres; SELECT 1 $$;',
+      /^troca de papel \(SET ROLE\)/,
+    ],
+    [
+      'SET role como opção de função',
+      'CREATE FUNCTION pedidos.f() RETURNS int LANGUAGE sql SET role = postgres AS $$ SELECT 1 $$;',
+      /^troca de papel \(SET role como parâmetro\)/,
+    ],
+    [
+      'SET "role" como opção do banco',
+      'ALTER DATABASE postgres SET "role" TO postgres;',
+      /^troca de papel \(SET role como parâmetro\)/,
+    ],
+    [
+      'SET "role" dinâmico',
+      'DO $$ BEGIN EXECUTE \'SET "role" TO postgres\'; END $$;',
+      /^troca de papel \(SET ROLE\).*\(em SQL dinâmico\)$/,
+    ],
   ];
   for (const [nome, comando, esperado] of recusados) {
     it(`${nome}: recusado, mesmo em _destrutiva com guarda`, () => {
@@ -438,9 +833,310 @@ describe('RLS, triggers, privilégios, funções e extensões (S27)', () => {
       'CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;',
       "DO $$ BEGIN RAISE EXCEPTION 'GRANT SELECT ON x TO PUBLIC; DISABLE TRIGGER'; END $$;",
       "COMMENT ON FUNCTION pedidos.f() IS E'Não use SECURITY DEFINER; GRANT x TO PUBLIC é proibido';",
+      // Q6 (1): EXECUTE de literal único ou de format(<literal>, ...); os de trigger e o
+      // privilégio EXECUTE não são o EXECUTE do PL/pgSQL.
+      "DO $$ BEGIN EXECUTE 'ANALYZE pedidos.itens'; END $$;",
+      "DO $$ BEGIN EXECUTE format('ANALYZE %I.%I', 'pedidos', quote_ident('itens')); END $$;",
+      "DO $$ BEGIN EXECUTE 'SELECT ''a'' || ''b'''; END $$;",
+      "DO $$ BEGIN EXECUTE E'SELECT \\'a\\''; END $$;",
+      "DO $$ DECLARE n int; BEGIN EXECUTE 'SELECT count(*) FROM pedidos.itens' INTO n; END $$;",
+      "DO $$ DECLARE n int; BEGIN EXECUTE format('SELECT count(*) FROM %I.itens WHERE id = $1', 'pedidos') INTO STRICT n USING 1; END $$;",
+      "DO $$ DECLARE r record; BEGIN FOR r IN EXECUTE 'SELECT 1' LOOP END LOOP; END $$;",
+      'CREATE TRIGGER t AFTER INSERT ON pedidos.itens FOR EACH ROW EXECUTE PROCEDURE pedidos.f();',
+      'GRANT EXECUTE ON FUNCTION pedidos.f() TO bairrin_app;',
+      'GRANT SELECT, EXECUTE ON ALL FUNCTIONS IN SCHEMA pedidos TO bairrin_app;',
+      'REVOKE EXECUTE ON FUNCTION pedidos.f() FROM PUBLIC;',
+      // Q6 (2): o REVOKE de privilégio padrão passa, inclusive o da opção de GRANT.
+      'ALTER DEFAULT PRIVILEGES IN SCHEMA pedidos REVOKE ALL ON TABLES FROM PUBLIC;',
+      'ALTER DEFAULT PRIVILEGES REVOKE GRANT OPTION FOR SELECT ON TABLES FROM bairrin_app;',
+      'ALTER DEFAULT PRIVILEGES FOR ROLE bairrin_migracao REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;',
+      // Q6 (3), premissa P5: política só para bairrin_app, inclusive USING (true).
+      'CREATE POLICY p ON pedidos.itens TO bairrin_app USING (true) WITH CHECK (true);',
+      'CREATE POLICY p ON pedidos.itens AS RESTRICTIVE FOR UPDATE TO bairrin_app USING (true);',
+      "CREATE POLICY p ON pedidos.itens TO bairrin_app USING (dono = current_setting('app.conta')::uuid);",
+      // Q6 (4): GRANT de privilégio tem ON.
+      'GRANT USAGE ON SCHEMA pedidos TO bairrin_app;',
+      // Q6 (5) e (6): RESET ROLE não troca de papel; COPY sem PROGRAM.
+      'RESET ROLE;',
+      'COPY (SELECT 1) TO STDOUT;',
+      // Seg-2 (7): o dono é o papel de migração.
+      'ALTER TABLE pedidos.itens OWNER TO bairrin_migracao;',
+      'ALTER TABLE "pedidos"."itens" OWNER TO "bairrin_migracao";',
+      'ALTER SCHEMA pedidos OWNER TO CURRENT_USER;',
+      // S33: $tag$ depois de DO (também com LANGUAGE) ou de AS; o -- no fim do corpo acaba
+      // nele; $ e $tag$ dentro de texto, de identificador entre aspas ou colados a um nome.
+      'DO LANGUAGE plpgsql $$ BEGIN NULL; END $$;',
+      'DO $ção$ BEGIN NULL; END $ção$;',
+      'DO $$ BEGIN NULL; END -- fim $$;',
+      'SELECT \'texto com $q$ dentro\', "coluna$q$", a$b$c FROM pedidos.itens;',
+      "DO $$ DECLARE n int; BEGIN EXECUTE 'SELECT count(*) FROM pedidos.itens WHERE id = $1' INTO n USING 1; END $$;",
+      // S34: o papel de migração cria e é dono; GRANT em tabelas do schema não é no schema.
+      'CREATE SCHEMA identidade AUTHORIZATION bairrin_migracao;',
+      'CREATE SCHEMA AUTHORIZATION CURRENT_USER;',
+      'GRANT CREATE ON SCHEMA pedidos TO bairrin_migracao;',
+      'GRANT ALL ON ALL TABLES IN SCHEMA pedidos TO bairrin_app;',
+      'REASSIGN OWNED BY bairrin_app TO bairrin_migracao;',
+      'REVOKE GRANT OPTION FOR SELECT ON pedidos.itens FROM bairrin_app;',
+      "COMMENT ON TABLE pedidos.itens IS 'CREATE RULE não é aceito; WITH GRANT OPTION também não';",
+      // R14: format só com %I, %L (também com posição) e %%.
+      "DO $$ BEGIN EXECUTE format('ANALYZE %1$I.%2$I -- 100%%', 'pedidos', 'itens'); END $$;",
+      "DO $$ BEGIN EXECUTE format(E'SELECT %L', 'a'); END $$;",
+      // R16: ALTER POLICY para bairrin_app ou sem TO (mantém os papéis).
+      'ALTER POLICY p ON pedidos.itens TO bairrin_app USING (true);',
+      "ALTER POLICY p ON pedidos.itens USING (dono = current_setting('app.conta')::uuid);",
+      // S34: 4 níveis de SQL dinâmico, todos conferidos.
+      aninhar('ANALYZE pedidos.itens', 4),
+      // R15: SET role fora do início do comando é coluna; coluna execute fora de PL/pgSQL.
+      "UPDATE pedidos.itens SET role = 'x', nota = 'y' WHERE role IS NULL;",
+      'UPDATE pedidos.itens AS i SET "role" = \'x\';',
+      "INSERT INTO pedidos.itens (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET role = 'x';",
+      'CREATE TABLE pedidos.t (execute int);\nALTER TABLE pedidos.t ENABLE ROW LEVEL SECURITY;',
+      // Q11: row_security em mensagem de RAISE ou em descrição de COMMENT não é configuração.
+      "COMMENT ON TABLE pedidos.itens IS 'row_security fica sempre ligado';",
+      "DO $$ BEGIN RAISE NOTICE 'row_security fica sempre ligado'; END $$;",
     ];
     for (const comando of aceitos) {
       assert.deepEqual(mensagens('1_x', REVERSAO + comando), [], comando);
+    }
+  });
+
+  it('o privilégio EXECUTE em ALTER DEFAULT PRIVILEGES reprova só pelo GRANT padrão', () => {
+    const sql = `${REVERSAO}ALTER DEFAULT PRIVILEGES GRANT EXECUTE ON FUNCTIONS TO bairrin_app;`;
+    const resultado = mensagens('1_x', sql);
+    assert.equal(resultado.length, 1, resultado.join('\n'));
+    assert.match(resultado[0], /^ALTER DEFAULT PRIVILEGES \.\.\. GRANT/);
+  });
+});
+
+describe('migração parecida com a da identidade do 01b (QA do grupo 0): sem falso positivo e com o motivo certo', () => {
+  const MIGRACAO = `-- reversao: DROP SCHEMA identidade CASCADE (só em banco sem dados).
+CREATE SCHEMA IF NOT EXISTS "identidade";
+GRANT USAGE ON SCHEMA "identidade" TO bairrin_app;
+CREATE TYPE "identidade"."PapelDaConta" AS ENUM ('consumidor', 'lojista', 'admin');
+CREATE TABLE "identidade"."contas" (
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "email" TEXT NOT NULL,
+  "role" "identidade"."PapelDaConta" NOT NULL DEFAULT 'consumidor',
+  "senha_hash" TEXT NOT NULL,
+  "criada_em" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "contas_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "contas_email_ck" CHECK ("email" = lower("email"))
+);
+CREATE TABLE "identidade"."sessoes" (
+  "id" UUID NOT NULL,
+  "conta_id" UUID NOT NULL,
+  CONSTRAINT "sessoes_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "contas_email_key" ON "identidade"."contas"("email");
+CREATE INDEX "contas_admin_idx" ON "identidade"."contas"("id") WHERE "role" = 'admin';
+ALTER TABLE "identidade"."sessoes" ADD CONSTRAINT "sessoes_conta_fkey" FOREIGN KEY ("conta_id") REFERENCES "identidade"."contas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "identidade"."contas" OWNER TO bairrin_migracao;
+ALTER TABLE "identidade"."sessoes" OWNER TO CURRENT_USER;
+ALTER TABLE "identidade"."contas" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "identidade"."contas" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "identidade"."sessoes" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "contas_aplicacao" ON "identidade"."contas" FOR ALL TO bairrin_app USING (true) WITH CHECK (true);
+CREATE POLICY "sessoes_aplicacao" ON "identidade"."sessoes" AS PERMISSIVE FOR ALL TO bairrin_app USING (true);
+REVOKE ALL ON ALL TABLES IN SCHEMA "identidade" FROM PUBLIC;
+GRANT SELECT, INSERT, UPDATE ON "identidade"."contas" TO bairrin_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON "identidade"."sessoes" TO bairrin_app;
+COMMENT ON TABLE "identidade"."contas" IS 'Contas; nunca GRANT TO PUBLIC nem SET ROLE aqui.';
+CREATE FUNCTION "identidade"."toca"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.criada_em := now(); RETURN NEW; END $$;
+CREATE TRIGGER "contas_toca" BEFORE UPDATE ON "identidade"."contas" FOR EACH ROW EXECUTE FUNCTION "identidade"."toca"();
+`;
+  const PASTA = '20261020000000_identidade';
+
+  it('passa: tabela com RLS, política TO bairrin_app USING (true), GRANT, OWNER TO bairrin_migracao e coluna role', () => {
+    assert.deepEqual(mensagens(PASTA, MIGRACAO), []);
+  });
+
+  /** Uma alteração por vez; cada uma reprova com exatamente o problema esperado. */
+  const mutacoes = [
+    [
+      'política sem TO',
+      (sql) => sql.replace('FOR ALL TO bairrin_app USING (true) WITH', 'FOR ALL USING (true) WITH'),
+      [/^CREATE POLICY sem TO/],
+    ],
+    [
+      'política para bairrin_app e PUBLIC, sem espaço depois da vírgula',
+      (sql) =>
+        sql.replace('TO bairrin_app USING (true) WITH', 'TO bairrin_app,PUBLIC USING (true) WITH'),
+      [/^CREATE POLICY para public/],
+    ],
+    [
+      'dono da tabela é a aplicação',
+      (sql) => sql.replace('OWNER TO bairrin_migracao', 'OWNER TO bairrin_app'),
+      [/^OWNER TO bairrin_app/],
+    ],
+    [
+      'ALTER DEFAULT PRIVILEGES ... GRANT',
+      (sql) =>
+        `${sql}ALTER DEFAULT PRIVILEGES IN SCHEMA "identidade" GRANT SELECT ON TABLES TO bairrin_app;\n`,
+      [/^ALTER DEFAULT PRIVILEGES \.\.\. GRANT/],
+    ],
+    [
+      'GRANT de papel a papel',
+      (sql) => `${sql}GRANT bairrin_migracao TO bairrin_app;\n`,
+      [/^GRANT de papel sem ON/],
+    ],
+    ['SET ROLE', (sql) => `${sql}SET ROLE postgres;\n`, [/^troca de papel \(SET ROLE\)/]],
+    [
+      'ALTER ROLE ... BYPASSRLS (as duas regras)',
+      (sql) => `${sql}ALTER ROLE bairrin_app BYPASSRLS;\n`,
+      [/^ALTER ROLE/, /^BYPASSRLS/],
+    ],
+    ['row_security desligado', (sql) => `${sql}SET row_security = off;\n`, [/^row_security/]],
+    [
+      'COPY ... PROGRAM',
+      (sql) => `${sql}COPY identidade.contas TO PROGRAM 'sh';\n`,
+      [/^COPY \.\.\. PROGRAM/],
+    ],
+    [
+      'EXECUTE com SQL concatenado',
+      (sql) =>
+        `${sql}DO $$ DECLARE t text := 'contas'; BEGIN EXECUTE 'ALTER TABLE identidade.' || t || ' DISABLE ROW LEVEL SECURITY'; END $$;\n`,
+      [/^EXECUTE com SQL concatenado/],
+    ],
+    [
+      'tabela sem RLS ao lado das outras',
+      (sql) => sql.replace('ALTER TABLE "identidade"."sessoes" ENABLE ROW LEVEL SECURITY;\n', ''),
+      [/^tabela "identidade\.sessoes" criada sem/],
+    ],
+  ];
+  for (const [nome, alterar, esperados] of mutacoes) {
+    it(`${nome}: reprova só por isso`, () => {
+      const resultado = mensagens(PASTA, alterar(MIGRACAO));
+      assert.equal(resultado.length, esperados.length, resultado.join('\n'));
+      esperados.forEach((esperado, indice) => {
+        assert.match(resultado[indice], esperado);
+      });
+    });
+  }
+
+  const recusadosNasBordas = [
+    [
+      'OWNER TO "BAIRRIN_MIGRACAO" entre aspas e em maiúsculas é outro papel',
+      'ALTER TABLE identidade.contas OWNER TO "BAIRRIN_MIGRACAO";',
+      /^OWNER TO BAIRRIN_MIGRACAO/,
+    ],
+    [
+      'OWNER TO em linhas separadas',
+      'ALTER TABLE identidade.contas OWNER\n  TO\n  bairrin_app;',
+      /^OWNER TO bairrin_app/,
+    ],
+    [
+      'GRANT de papel em linhas separadas',
+      'GRANT\n  bairrin_migracao\n  TO bairrin_app;',
+      /^GRANT de papel sem ON/,
+    ],
+    [
+      'SET com comentário antes de ROLE',
+      'SET /* x */ ROLE postgres;',
+      /^troca de papel \(SET ROLE\)/,
+    ],
+    [
+      'SET LOCAL ROLE dentro do corpo de uma função',
+      'CREATE FUNCTION identidade.f() RETURNS int LANGUAGE plpgsql AS $$ BEGIN SET LOCAL ROLE postgres; RETURN 1; END $$;',
+      /^troca de papel \(SET ROLE\)/,
+    ],
+    [
+      'set_config em maiúsculas',
+      "SELECT SET_CONFIG('ROLE', 'postgres', false);",
+      /^troca de papel \(set_config\)/,
+    ],
+    [
+      'ALTER ROLE dentro de DO',
+      'DO $$ BEGIN ALTER ROLE bairrin_app BYPASSRLS; END $$;',
+      /^ALTER ROLE/,
+    ],
+    [
+      'COPY e PROGRAM em linhas separadas, em minúsculas',
+      "copy identidade.contas\n to\n program 'sh';",
+      /^COPY \.\.\. PROGRAM/,
+    ],
+    [
+      'RETURN QUERY EXECUTE de variável',
+      "CREATE FUNCTION identidade.f() RETURNS SETOF int LANGUAGE plpgsql AS $$ DECLARE q text := 'SELECT 1'; BEGIN RETURN QUERY EXECUTE q; END $$;",
+      /^EXECUTE com argumento que não é literal/,
+    ],
+    [
+      'EXECUTE de concat()',
+      "DO $$ DECLARE t text := 'itens'; BEGIN EXECUTE concat('ANALYZE identidade.', t); END $$;",
+      /^EXECUTE com argumento que não é literal/,
+    ],
+  ];
+  for (const [nome, comando, esperado] of recusadosNasBordas) {
+    it(`${nome}: recusado`, () => {
+      const resultado = mensagens(PASTA, `${REVERSAO}${comando}`);
+      assert.ok(
+        resultado.some((mensagem) => esperado.test(mensagem)),
+        `${esperado}: ${resultado.join(' | ')}`,
+      );
+    });
+  }
+
+  it('aceita as formas legítimas parecidas com as proibidas', () => {
+    const aceitos = [
+      // Coluna chamada role entre aspas, o contorno documentado do falso positivo.
+      'UPDATE identidade.contas SET "role" = \'consumidor\' WHERE "role" IS NULL;',
+      'ALTER TABLE identidade.contas ALTER COLUMN "role" SET NOT NULL, ALTER COLUMN role SET DEFAULT \'consumidor\';',
+      'ALTER TABLE identidade.contas ADD COLUMN role text;',
+      'RESET ROLE;',
+      'RESET SESSION AUTHORIZATION;',
+      "SET LOCAL lock_timeout = '5s';",
+      // `||` depois de USING é parâmetro, não o texto do comando.
+      "DO $$ DECLARE v text; BEGIN EXECUTE 'SELECT $1' INTO v USING 'a' || 'b'; END $$;",
+      'CREATE TRIGGER t BEFORE INSERT ON identidade.contas FOR EACH ROW\n  EXECUTE\n  FUNCTION identidade.f();',
+      'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA identidade TO bairrin_app;',
+      'GRANT EXECUTE ON ALL ROUTINES IN SCHEMA identidade TO bairrin_app;',
+      'CREATE POLICY p ON identidade.contas TO bairrin_app USING(true);',
+      'CREATE POLICY p ON identidade.contas FOR INSERT TO bairrin_app WITH CHECK(true);',
+      'CREATE POLICY p ON identidade.contas TO "Authenticated" USING (true);',
+      'ALTER TABLE identidade.contas OWNER TO BAIRRIN_MIGRACAO;',
+    ];
+    for (const comando of aceitos) {
+      assert.deepEqual(mensagens(PASTA, REVERSAO + comando), [], comando);
+    }
+  });
+
+  it('UPDATE ... SET role sem aspas passa (R15): só SET no início do comando troca o papel', () => {
+    assert.deepEqual(mensagens(PASTA, `${REVERSAO}UPDATE identidade.contas SET role = 'x';`), []);
+    assert.match(
+      mensagens(
+        PASTA,
+        `${REVERSAO}UPDATE identidade.contas SET role = 'x'; SET role TO postgres;`,
+      ).join(),
+      /^troca de papel \(SET ROLE\)/,
+    );
+  });
+
+  it('SET ROLE é recusado em cada posição em que um comando começa (QA, R15)', () => {
+    const casos = [
+      ['no início do arquivo', 'SET ROLE postgres;'],
+      ['depois de ponto e vírgula', 'SELECT 1; SET LOCAL ROLE postgres;'],
+      ['comentário entre SET e ROLE', 'SET /* x */ ROLE postgres;'],
+      ['depois de BEGIN', 'DO $$ BEGIN SET ROLE postgres; END $$;'],
+      [
+        'depois de ponto e vírgula dentro de DO',
+        'DO $$ BEGIN PERFORM 1; SET ROLE postgres; END $$;',
+      ],
+      ['depois de THEN', 'DO $$ BEGIN IF true THEN SET ROLE postgres; END IF; END $$;'],
+      ['depois de LOOP', 'DO $$ BEGIN LOOP SET ROLE postgres; EXIT; END LOOP; END $$;'],
+      [
+        'no corpo SQL depois de AS',
+        'CREATE FUNCTION identidade.f() RETURNS void LANGUAGE sql AS $$ SET ROLE postgres $$;',
+      ],
+      [
+        'depois de BEGIN ATOMIC',
+        'CREATE FUNCTION identidade.f() RETURNS void LANGUAGE sql BEGIN ATOMIC SET ROLE postgres; END;',
+      ],
+    ];
+    for (const [posicao, comando] of casos) {
+      assert.match(
+        mensagens(PASTA, REVERSAO + comando).join(),
+        /^troca de papel \(SET ROLE\)/,
+        posicao,
+      );
     }
   });
 });

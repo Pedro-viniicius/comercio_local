@@ -51,6 +51,35 @@ export default defineConfig(
     languageOptions: { globals: globals.node },
   },
 
+  // API: o texto do log é fixo e escrito pelo código (Seg-1, S36). O logger
+  // já descarta a mensagem do erro e os argumentos de interpolação, mas não vê
+  // o texto montado antes da chamada: template string com expressão e
+  // `.message` não entram como argumento de método de log (nem como valor de
+  // propriedade do objeto). `console` fica de fora: as CLIs escrevem para quem
+  // roda o release, não para o log.
+  {
+    files: ['apps/api/src/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...(() => {
+          const chamadaDeLog =
+            "CallExpression[callee.type='MemberExpression'][callee.object.name!='console']" +
+            '[callee.property.name=/^(trace|debug|info|warn|error|fatal|log|verbose)$/]';
+          const mensagem =
+            'Texto do log é fixo (CONVENCOES, Logs): sem template string com expressão e sem ' +
+            '`.message`. Ponha o erro em `err` e os dados não pessoais em chaves do objeto.';
+          return [
+            `${chamadaDeLog} > TemplateLiteral[expressions.length>0]`,
+            `${chamadaDeLog} > MemberExpression[property.name='message']`,
+            `${chamadaDeLog} > ObjectExpression > Property > TemplateLiteral.value[expressions.length>0]`,
+            `${chamadaDeLog} > ObjectExpression > Property > MemberExpression.value[property.name='message']`,
+          ].map((selector) => ({ selector, message: mensagem }));
+        })(),
+      ],
+    },
+  },
+
   // Painel: React no navegador.
   {
     files: ['apps/painel/**/*.{ts,tsx}'],

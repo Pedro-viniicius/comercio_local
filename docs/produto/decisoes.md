@@ -2,6 +2,11 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-16 — Decisão do dono: plano 01b atualizado aprovado
+- Contexto: o `arquiteto` acrescentou ao `docs/produto/planos/01b-identidade.md` o grupo 0 (etapas 0a e 0b, com as pendências do 01a). Também corrigiu a etapa 2 (já feita no 01a), a etapa 16 (a guarda de autenticação no núcleo passa a usar uma porta) e os comandos de integração.
+- Decisão: plano aprovado, com a premissa P5. O verificador reprova política sem `TO` ou aberta a `PUBLIC`, `anon`, `authenticated` ou `service_role`; `TO bairrin_app USING (true)` continua aceito. O dono respondeu "-continue" à pergunta de aprovação, e o lead registrou isso como aprovação.
+- Pendência P6 (poison pill do relay): fora do 01b, obrigatória antes do primeiro deploy de produção; o dono decide quando entra.
+
 ## 2026-10-16 — Decisão do dono: pendências da revisão do 01a vão para o começo do 01b
 - Contexto: a revisão do plano 01a (fundação) terminou sem bloqueio, com três achados baixos do `qa` (Q5 a Q7) e quatro recomendações do `seguranca` para antes do 01b, que traz dado pessoal de verdade.
 - Decisão: corrigir tudo no começo do 01b, numa etapa própria, antes das demais.

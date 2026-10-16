@@ -1,2 +1,2 @@
-- [Como rodar testes](como-rodar-testes.md) — comandos isolados, sondas com decorators, cópia limpa, armadilhas do `pnpm -r`
-- [Estado do 01a após rodada 2](verificador-migracoes-e-logs-lacunas.md) — Q1-Q4 corrigidos; lacunas baixas restantes de logs, verificador, depcruise
+- [Como rodar testes](como-rodar-testes.md) — comandos isolados, sondas, cópia com código antigo, singleton do nestjs-pino, sonda no Postgres de teste
+- [Estado após a rodada 2 do grupo 0 do 01b](verificador-migracoes-e-logs-lacunas.md) — Q5-Q11, S33-S36 fechados; mutação cobre catálogo e SET ROLE; lacunas baixas

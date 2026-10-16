@@ -43,6 +43,7 @@ Resumo do ADR-003 (a verificação é `pnpm deps:verificar`):
 - `modulos/<contexto>/infra`: adaptadores (Prisma, SMTP, gateway).
 - `modulos/<contexto>/http`: controladores e conversão para Problem Details.
 - Um módulo só importa outro pelo `index.ts` dele.
+- Fakes e helpers de teste ficam em `apps/api/test/fakes/<contexto>/`. Código de produção (`apps/api/src/`, fora os `*.test.ts`) não importa nada de `apps/api/test/` (regra 11 do ADR-003; o `pnpm deps:verificar` reprova).
 - A regra de negócio nunca fica no controlador nem no componente.
 - Repositórios pegam o cliente do banco em `UnidadeDeTrabalhoPrisma.cliente()`, nunca direto no `PrismaService`; assim participam da transação do caso de uso.
 - Evento de domínio é publicado dentro da transação do caso de uso, pelo `PublicadorDeEventos` (ADR-011).
@@ -69,6 +70,7 @@ Resumo do ADR-003 (a verificação é `pnpm deps:verificar`):
 - Log em JSON, com `idRequisicao`. Sem corpo de requisição, sem query na URL.
 - Nunca registre nome, telefone, e-mail, documento, token, senha nem segredo. Isso vale também para a mensagem de erro de biblioteca de banco, que costuma trazer os parâmetros da consulta: registre só o tipo e o código (`serializarErro`).
 - O redator de logs e do Sentry apaga o valor de toda chave cujo nome lembra dado pessoal ou segredo (`nome`, `codigo`, `hash`, `email`…, a mesma lista de `ehChaveProtegida`). A regra olha cada palavra do nome, inclusive dentro de camelCase (`codigoDoErro` também é apagado). Em log, use para o que não é pessoal nomes sem essas palavras, como `erroSql` e `evento`, e não afrouxe a regra.
+- O texto do log é sempre fixo e escrito pelo código. O logger troca por `sem mensagem` o texto que vem de um `Error` (`logger.error(erro)` ou `logger.error({ err })` sem texto) ou que não é string, e descarta os argumentos de interpolação (`logger.info('conta %s', email)` grava só `conta %s`). A chave `msg` do objeto é descartada (o texto é só o segundo argumento), e `message` e `msg` aninhadas são redigidas. O `context` do nestjs-pino só passa se for texto de uma linha com até 80 caracteres; senão vira `contexto descartado`. Na API, o lint reprova template string com expressão (`` `conta ${email}` ``) e `.message` como argumento de método de log ou como valor de propriedade do objeto; texto montado antes, numa variável, não é detectado e fica com a revisão humana.
 - Auditoria e payload da outbox sem dado pessoal; campo pessoal vira `{"alterado": true}` (ADR-015).
 - Todo módulo que guarda dado pessoal implementa `AnonimizadorDeTitular`.
 

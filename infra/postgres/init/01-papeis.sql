@@ -47,5 +47,7 @@ BEGIN
 END
 $$;
 
--- Já é o padrão desde o Postgres 15; explícito para não depender da versão.
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+-- Espelha o Supabase depois do checklist de deploy (`docs/operacao/checklist-deploy.md`): o
+-- schema public não dá nada a PUBLIC, nem CREATE (já o padrão desde o Postgres 15) nem USAGE.
+-- Assim a aplicação só enxerga os schemas em que a migração deu USAGE a ela.
+REVOKE ALL ON SCHEMA public FROM PUBLIC;

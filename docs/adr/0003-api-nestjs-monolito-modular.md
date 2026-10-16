@@ -11,7 +11,7 @@ O dono pediu DDD, Clean Architecture e um monólito modular preparado para extra
 
 API em NestJS 12 (Node 22, ESM), um módulo por contexto em `apps/api/src/modulos/<contexto>/{dominio,aplicacao,infra,http}` e o núcleo em `apps/api/src/compartilhado`. O domínio fica sem framework. Duas entradas no mesmo código: `src/main.ts` (HTTP) e `src/worker.ts` (relay da outbox, assinantes e tarefas), dois processos no deploy.
 
-As fronteiras são checadas por `pnpm deps:verificar` (dependency-cruiser, `.dependency-cruiser.cjs`), com dez regras, todas provadas por fixtures em `apps/api/test/fronteiras/fixtures`:
+As fronteiras são checadas por `pnpm deps:verificar` (dependency-cruiser, `.dependency-cruiser.cjs`), com onze regras, todas provadas por fixtures em `apps/api/test/fronteiras/fixtures`:
 
 1. o domínio não importa aplicação, infra nem http;
 2. o domínio não importa `@nestjs/*` nem `@prisma/*`;
@@ -22,7 +22,8 @@ As fronteiras são checadas por `pnpm deps:verificar` (dependency-cruiser, `.dep
 7. o domínio não importa adaptador do núcleo;
 8. a aplicação não importa adaptador do núcleo;
 9. o núcleo (`compartilhado`) não importa `modulos/`;
-10. só a infra (`compartilhado/infra/` ou `modulos/<m>/infra/`) importa o client gerado do Prisma.
+10. só a infra (`compartilhado/infra/` ou `modulos/<m>/infra/`) importa o client gerado do Prisma;
+11. o código de produção (`apps/api/src/`, fora os `*.test.ts`) não importa `apps/api/test/`: fakes e helpers de teste ficam em `apps/api/test/fakes/<contexto>/` (pendência Q7 do 01a).
 
 ### Portas e adaptadores do núcleo
 
@@ -33,7 +34,7 @@ O núcleo separa cada porta do seu adaptador. A porta é um arquivo sem Nest nem
 | `transacao/unidade-de-trabalho.ts` (`UnidadeDeTrabalho`)           | `infra/unidade-de-trabalho-prisma.ts`                                     |
 | `eventos/publicador.ts` (`PublicadorDeEventos`)                    | `infra/publicador-na-outbox.ts`                                           |
 | `auditoria/repositorio-de-auditoria.ts` (`RepositorioDeAuditoria`) | `infra/repositorio-de-auditoria-prisma.ts`                                |
-| `email/enviador-de-email.ts` (`EnviadorDeEmail`)                   | `infra/smtp.adaptador.ts` (`email/enviador-falso.ts` nos testes)          |
+| `email/enviador-de-email.ts` (`EnviadorDeEmail`)                   | `infra/smtp.adaptador.ts` (falso em `test/fakes/compartilhado/`)          |
 | `tempo/relogio.ts` (`Relogio`)                                     | o próprio arquivo: `RelogioDoSistema` e `RelogioFixo` só usam a linguagem |
 
 Para as regras 7 e 8, "adaptador do núcleo" é tudo o que está em `compartilhado/{infra,http,log,observabilidade,config,saude}/`, todo `*.adaptador.ts` dentro de `compartilhado` e o `compartilhado.module.ts`. As portas ficam fora dessas pastas, por isso não precisam de exceção na regra. O teste de fronteiras também confere, na árvore real, que os arquivos de porta não importam Nest, Prisma, o client gerado nem adaptador.
