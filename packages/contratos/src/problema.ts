@@ -40,14 +40,22 @@ export type CampoDoProblema = z.infer<typeof campoDoProblemaSchema>;
 
 /**
  * Códigos de erro da API e o que cada um significa em HTTP. Planos seguintes
- * acrescentam códigos aqui (ex.: `sem_acesso_painel`, do 01b).
+ * acrescentam códigos aqui. O texto mostrado ao usuário é do app ou do painel
+ * (`textos/pt-BR.ts`); o `title` é a descrição técnica do código.
  */
 export const ERROS = {
   validacao: { status: 400, title: 'Dados inválidos' },
   nao_autenticado: { status: 401, title: 'Autenticação necessária' },
   sem_permissao: { status: 403, title: 'Sem permissão para esta ação' },
+  /** Login no painel com senha certa e conta sem perfil `admin` (01b, S23). */
+  sem_acesso_painel: { status: 403, title: 'Esta conta não tem acesso ao painel' },
   nao_encontrado: { status: 404, title: 'Recurso não encontrado' },
   conflito: { status: 409, title: 'Conflito com o estado atual do recurso' },
+  /** Exclusão de conta com pedido em andamento ou valor a receber (01b, CA-11). */
+  exclusao_com_pendencias: {
+    status: 409,
+    title: 'A conta tem pendências que adiam a exclusão',
+  },
   corpo_grande_demais: { status: 413, title: 'Corpo da requisição grande demais' },
   limite_excedido: { status: 429, title: 'Muitas requisições, tente de novo em instantes' },
   erro_interno: { status: 500, title: 'Erro interno' },

@@ -1,5 +1,5 @@
-// Controle: `@bairrin/contratos/validadores` ainda não existe no pacote, mas é a
-// exceção da regra. Quando o subcaminho existir, apague a linha do
-// `@ts-expect-error` (e este comentário).
-// @ts-expect-error subcaminho ainda inexistente em @bairrin/contratos
+// Controle: `@bairrin/contratos/validadores` é a exceção da regra
+// `dominio-so-importa-validadores`. O import pelo nome do pacote resolve para o
+// fonte real (`packages/contratos/src/validadores/index.ts`, condição
+// `@bairrin/fonte`). O nome do arquivo é de quando o subcaminho não existia.
 import '@bairrin/contratos/validadores';

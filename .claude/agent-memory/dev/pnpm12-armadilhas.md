@@ -16,3 +16,5 @@ Conferido em 2026-10-16 com pnpm 12.4.1:
 
 **Why:** a etapa 1 do plano 01a perdeu tempo com essas diferenças.
 **How to apply:** ao mexer em dependências ou no workspace, confira com `pnpm config get <chave>` se a chave foi lida.
+
+Conferido em 2026-10-16 (plano 01b, etapa 1a): para dependência `catalog:`, escreva a linha no `catalog` do `pnpm-workspace.yaml` antes e rode `pnpm --filter <pkg> add '<nome>@catalog:'`. `@node-rs/argon2` 2.2.2 não tem script de instalação (binários em dependências opcionais por plataforma): `allowBuilds` não mudou. `pnpm audit --prod` tem 3 achados só via `@prisma/client>prisma` (deepmerge-ts, mysql2 x2), idênticos antes e depois das dependências da identidade.

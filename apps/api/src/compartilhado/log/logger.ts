@@ -2,7 +2,8 @@
 // requisição, sem corpo, sem cabeçalhos, URL sem query e redação de chaves
 // sensíveis em todo objeto registrado e em todo vínculo de logger filho
 // (CA-F3; S20). O texto do registro é só o que o código escreveu: sem a
-// mensagem do erro nem argumentos interpolados (Seg-1).
+// mensagem do erro nem argumentos interpolados (Seg-1), e trocado por um fixo
+// quando tem cara de dado pessoal (S70).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Params } from 'nestjs-pino';
 import pino, {
@@ -71,21 +72,58 @@ function redigirParaLog<T>(objeto: T): T {
 export const TEXTO_SEM_MENSAGEM = 'sem mensagem';
 
 /**
- * Contexto do nestjs-pino (chave `context`) que não é um nome curto de uma
- * linha. Os hooks de encerramento do Nest chamam `Logger.error(erro, erro.stack)`
- * sem contexto, e o nestjs-pino toma o último argumento (a pilha, com a
- * mensagem) como contexto (S35b).
+ * Texto do registro que tem cara de dado pessoal (S70): defesa em profundidade
+ * para o texto montado antes da chamada, que a regra de lint não vê
+ * (`const texto = ...; logger.info(texto)`). Pega três formas:
+ * - `@`, de e-mail;
+ * - 6 dígitos ou mais, seguidos ou separados só por espaço, `(`, `)`, `.`, `/`
+ *   ou `-`: telefone (`(35) 99876-5432`, `+55 35 99876 5432`), CPF
+ *   (`123.456.789-09`), CNPJ, CEP sem hífen e código de verificação
+ *   (`12 34 56`). Data com hífen (`2026-10-16`) também cai aqui: descartar um
+ *   texto fixo é aceitável, vazar o dado não;
+ * - quebra de linha (`\n`, `\r`, U+2028 e U+2029): texto fixo tem uma linha
+ *   só, e a pilha de um erro (`erro.stack`) começa pela mensagem dele.
+ * Nome, endereço e documento escrito por extenso não são pegos: ficam com a
+ * regra de lint e com a revisão.
+ *
+ * Sem ReDoS: dígito e separador são classes disjuntas, então cada caractere
+ * do texto só tem um jeito de ser lido, e a busca é linear no tamanho dele.
+ */
+export const TEXTO_DESCARTADO = 'texto descartado';
+const TEXTO_COM_CARA_DE_DADO = /@|\d(?:[\s()./-]*\d){5,}|[\n\r\u2028\u2029]/;
+
+/** O texto como vai para a linha: o recebido, ou `TEXTO_DESCARTADO`. */
+function textoDoLog(texto: string): string {
+  return TEXTO_COM_CARA_DE_DADO.test(texto) ? TEXTO_DESCARTADO : texto;
+}
+
+/**
+ * Contexto do nestjs-pino (chave `context`) que não é um nome curto de
+ * identificador. Os hooks de encerramento do Nest chamam
+ * `Logger.error(erro, erro.stack)` sem contexto, e o nestjs-pino toma o último
+ * argumento (a pilha, com a mensagem) como contexto (S35b); um contexto de uma
+ * linha também pode trazer um dado (`fulano@exemplo.com`, um telefone), P8.
  */
 export const CONTEXTO_DESCARTADO = 'contexto descartado';
 const TAMANHO_MAXIMO_DO_CONTEXTO = 80;
+/**
+ * Nome de classe ou de módulo (`ExceptionsHandler`, `Identidade.Sessoes:renovar`):
+ * começa com letra e só tem letra, dígito, `_`, `.`, `:` e `-`. Sem a flag `m`,
+ * o `$` só casa no fim do texto, então quebra de linha também fica de fora.
+ */
+const FORMATO_DO_CONTEXTO = /^[A-Za-z][\w.:-]*$/;
 
-/** Contexto aceito como veio: ausente ou texto de uma linha com até 80 caracteres. */
+/**
+ * Contexto aceito como veio: ausente ou nome de identificador com até 80
+ * caracteres. Vale para o objeto do registro e para os vínculos de filho
+ * (`child`, `setBindings`), Q16.
+ */
 function ehContextoAceito(contexto: unknown): boolean {
   return (
     contexto === undefined ||
     (typeof contexto === 'string' &&
       contexto.length <= TAMANHO_MAXIMO_DO_CONTEXTO &&
-      !/[\n\r\u2028\u2029]/.test(contexto))
+      FORMATO_DO_CONTEXTO.test(contexto))
   );
 }
 
@@ -125,19 +163,24 @@ function objetoDoLog(objeto: object): object {
  * - o objeto do primeiro argumento passa por `objetoDoLog` (`Error`, `msg`
  *   e `context`);
  * - sem texto, ou com texto que não é string, o texto é `TEXTO_SEM_MENSAGEM`;
+ * - texto com cara de dado pessoal vira `TEXTO_DESCARTADO` (`textoDoLog`);
  * - argumentos depois do texto são descartados.
- * Texto montado antes da chamada (template string) continua com quem escreve.
+ * O texto montado antes da chamada continua com quem escreve (regra de lint);
+ * esta troca só pega o que tem cara de e-mail, de número ou de pilha.
  */
 function normalizarArgumentosDoLog(
   argumentos: readonly unknown[],
 ): [objeto: object, texto: string] | [texto: string] {
   const [primeiro, segundo] = argumentos;
   if (typeof primeiro === 'object' && primeiro !== null) {
-    return [objetoDoLog(primeiro), typeof segundo === 'string' ? segundo : TEXTO_SEM_MENSAGEM];
+    return [
+      objetoDoLog(primeiro),
+      typeof segundo === 'string' ? textoDoLog(segundo) : TEXTO_SEM_MENSAGEM,
+    ];
   }
   // `info(null, 'texto')` e `info(undefined, 'texto')`: o pino usa o segundo.
   const texto = primeiro === undefined || primeiro === null ? segundo : primeiro;
-  return [typeof texto === 'string' ? texto : TEXTO_SEM_MENSAGEM];
+  return [typeof texto === 'string' ? textoDoLog(texto) : TEXTO_SEM_MENSAGEM];
 }
 
 /** 5xx e erro viram `error`; 4xx, `warn`; o resto, `info`. */
@@ -172,11 +215,30 @@ export function opcoesDoPino(ambiente: Pick<Ambiente, 'LOG_NIVEL'>): LoggerOptio
 }
 
 /**
+ * Vínculos de logger filho como vão para a linha: redigidos e com `context`
+ * fora de `ehContextoAceito` trocado por `CONTEXTO_DESCARTADO` (Q16), como no
+ * objeto do registro. O redator devolve cópia de objeto comum: ler `context`
+ * dela não chama getter de quem registrou.
+ */
+function vinculosDoLog(vinculos: Bindings): Bindings {
+  const redigidos = redigirParaLog(vinculos);
+  if (
+    typeof redigidos !== 'object' ||
+    redigidos === null ||
+    !Object.hasOwn(redigidos, 'context') ||
+    ehContextoAceito(redigidos['context'])
+  ) {
+    return redigidos;
+  }
+  return { ...redigidos, context: CONTEXTO_DESCARTADO };
+}
+
+/**
  * O pino só passa pelo formatador `bindings` os vínculos do logger raiz: os de
  * `child()` (o id da requisição, o `assign` do nestjs-pino) e os de
  * `setBindings()` num filho vão direto para a linha. Os dois métodos são
- * trocados no logger raiz por versões que redigem antes; os filhos são criados
- * com `Object.create(pai)` e herdam a troca.
+ * trocados no logger raiz por versões que passam antes por `vinculosDoLog`;
+ * os filhos são criados com `Object.create(pai)` e herdam a troca.
  */
 function redigirVinculosDosFilhos(raiz: Logger): void {
   // Os originais do pino são chamados com o `this` de quem os chama (o filho,
@@ -186,10 +248,10 @@ function redigirVinculosDosFilhos(raiz: Logger): void {
   // eslint-disable-next-line @typescript-eslint/unbound-method
   const vincularDoPino = raiz.setBindings;
   raiz.child = function (this: Logger, vinculos: Bindings, opcoes?: object) {
-    return filhoDoPino.call(this, redigirParaLog(vinculos), opcoes);
+    return filhoDoPino.call(this, vinculosDoLog(vinculos), opcoes);
   } as Logger['child'];
   raiz.setBindings = function (this: Logger, vinculos: Bindings) {
-    vincularDoPino.call(this, redigirParaLog(vinculos));
+    vincularDoPino.call(this, vinculosDoLog(vinculos));
   };
 }
 

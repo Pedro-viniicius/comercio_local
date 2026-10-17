@@ -2,6 +2,13 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-17 — Decisão do dono: achados que sobraram da revisão do grupo A do 01b
+- Contexto: depois das duas rodadas de revisão do grupo A (etapas 1a, 2, 3a e 5a), o `seguranca` deu o veredito "corrigir antes do release". Sobraram dois achados MÉDIA, corrigidos só em parte: S70 (texto de erro com dado pessoal ainda chega ao log por `e.stack`, `child`/`assign`/`setBindings` e telefone ou CPF formatado) e S74 (a lista de senhas comuns escrita à mão é curta).
+- Decisão: o S70 é corrigido já, numa terceira rodada só dele, antes do commit do grupo A. O S71 (BAIXA, do mesmo arquivo do lint) entrou junto. O S74 vira a etapa 5b do plano 01b, no grupo B, obrigatória antes da etapa 6, que é a primeira a gravar senha. A 5b usa uma lista pública versionada como dado, com licença conferida, sem pacote novo.
+- Motivo: o S70 tem correção pequena e já descrita. O S74 exige baixar e conferir listas de terceiros. Nenhuma etapa grava senha antes da 6, então hoje não há exposição.
+- O dono escolheu a opção recomendada pelo lead e autorizou o commit e o push do grupo A depois do S70.
+- Resultado da rodada 3: `seguranca` sem bloqueios (S70 e S71 corrigidos); `revisor` aprovado com ressalvas, só sugestões (R35 a R38).
+
 ## 2026-10-16 — Decisão do dono: publicação automática nas lojas aprovada
 - Contexto: o dono pediu automatizar o envio dos apps para a App Store e a Google Play. O `arquiteto` fez o plano `docs/produto/planos/publicacao-nas-lojas.md` (CA-111 a CA-121), revisado pelo `seguranca` em duas rodadas.
 - Decisão: plano aprovado com todas as recomendações.

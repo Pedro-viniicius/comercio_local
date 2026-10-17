@@ -15,7 +15,7 @@ As fronteiras são checadas por `pnpm deps:verificar` (dependency-cruiser, `.dep
 
 1. o domínio não importa aplicação, infra nem http;
 2. o domínio não importa `@nestjs/*` nem `@prisma/*`;
-3. o domínio só importa `@bairrin/contratos/validadores` (o subcaminho ainda não existe);
+3. o domínio só importa `@bairrin/contratos/validadores` (funções puras, sem zod, em `packages/contratos/src/validadores/`);
 4. a aplicação não importa infra nem http;
 5. um módulo só importa outro pelo `index.ts`;
 6. apps e pacotes não importam `apps/api`;

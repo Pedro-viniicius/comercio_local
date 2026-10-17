@@ -10,6 +10,8 @@ metadata:
 
 Não confundir com riscos já decididos no produto que não são aceite de achado: telefone sem verificação por SMS (decisão do dono em `docs/produto/decisoes.md`); bloqueio direcionado de conta por até 15 min aceito como efeito do CA-04 pelo próprio brief (o plano 01b diz "nunca bloqueio definitivo").
 
+Limitação declarada pelo dev/lead, não aceite do dono (rodada 2 do grupo A do 01b, 2026-10-16): `GRANT USAGE ON SCHEMA public TO PUBLIC` não é apontado pelo catálogo no Postgres local; no Supabase o `acessosIndevidos` pega (PUBLIC dá USAGE ao `anon`). Não é achado enquanto o `acessosIndevidos` rodar no release do Supabase; se sair, vira achado.
+
 Pendente de registro pelo dono (2026-10-16): conta criada com e-mail alheio pode ser usada sem pagar até o titular recuperar a senha (consequência do login sem verificação). Reabre se alguma ação além de navegar/carrinho dispensar verificação (ex.: criar loja).
 
 Pendente de decisão do dono (levantado em 2026-10-16, revisão do 01a): EAS Update sem assinatura de código (exige plano pago do Expo). Antes das etapas 8/9 ligarem updates: desligar `expo-updates` ou registrar aceite com MFA na conta Expo e poucas pessoas com permissão de publicar. O plano `publicacao-nas-lojas.md` (P2) propõe tirar o EAS Update. Se o dono aprovar, isso elimina o risco e não exige aceite.

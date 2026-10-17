@@ -30,9 +30,20 @@ const TRECHOS_SENSIVEIS = [
 /**
  * Chaves de texto livre, comparadas inteiras (depois da mesma normalização):
  * a mensagem de um erro costuma ir para elas (`{ message: erro.message }`), e
- * o redator não sabe o que há no texto. Inteiras para não pegar `messageId`.
+ * o redator não sabe o que há no texto. A pilha também (`{ stack: erro.stack }`):
+ * ela começa pela mensagem. Inteiras para não pegar `messageId` nem
+ * `mensagemId`; pela normalização, `errormessage` cobre `errorMessage` e
+ * `error_message`. O `err` do primeiro nível do log não passa por aqui: vai
+ * para `resumirErro`, que guarda só os quadros da pilha.
  */
-const CHAVES_DE_TEXTO_LIVRE = ['message', 'msg'] as const;
+const CHAVES_DE_TEXTO_LIVRE = [
+  'message',
+  'msg',
+  'mensagem',
+  'errormessage',
+  'stack',
+  'pilha',
+] as const;
 
 /** Profundidade máxima percorrida; abaixo dela o valor é descartado. */
 const PROFUNDIDADE_MAXIMA = 8;

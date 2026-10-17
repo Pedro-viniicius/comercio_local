@@ -130,16 +130,25 @@ describe('fronteiras de camadas: fixtures', () => {
     }
   });
 
-  it('a resolução enxerga os imports: só os dois subcaminhos inexistentes ficam sem resolver', () => {
+  it('a resolução enxerga os imports: só o subcaminho inexistente fica sem resolver', () => {
     const naoResolvidas = fixtures.modules
       .flatMap((m) =>
         m.dependencies.filter((d) => d.couldNotResolve).map((d) => `${m.source} -> ${d.module}`),
       )
       .sort();
     expect(naoResolvidas).toEqual([
-      `${M}/a/dominio/usa-validadores-nao-resolvido.ts -> @bairrin/contratos/validadores`,
       `${M}/a/dominio/viola-contratos-outro-subcaminho.ts -> @bairrin/contratos/outro`,
     ]);
+  });
+
+  it('@bairrin/contratos/validadores resolve para o fonte do subcaminho no pacote real', () => {
+    const fixture = fixtures.modules.find(
+      (m) => m.source === `${M}/a/dominio/usa-validadores-nao-resolvido.ts`,
+    );
+    const destinos = fixture?.dependencies.map((d) => d.resolved) ?? [];
+    expect(destinos).toHaveLength(1);
+    // Fora da raiz das fixtures, o caminho do pacote real vem com `../`.
+    expect(destinos[0]).toMatch(/^(\.\.\/)+packages\/contratos\/src\/validadores\/index\.ts$/);
   });
 });
 

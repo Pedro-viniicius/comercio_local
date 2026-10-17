@@ -41,6 +41,23 @@ z.config({
 
 export { z };
 
+/** O texto tem pelo menos um caractere (depois do corte, se o esquema corta). */
+export function ehTextoPreenchido(texto: string): boolean {
+  return texto.length > 0;
+}
+
+/**
+ * Opções do check de texto obrigatório: `.refine(ehTextoPreenchido, CAMPO_OBRIGATORIO)`.
+ * O campo vazio sai com o código `obrigatorio` e a validação dele para ali.
+ *
+ * Os esquemas de texto deste pacote usam este `refine`, e não `.min(1)`, nem
+ * `.max(n)` ou `.length(n)`: os checks de tamanho do zod rodam também em valor
+ * que não é texto mas tem `length` (`[]`, `{"length": 0}`), mesmo depois do
+ * erro de tipo, e o campo sairia com dois erros (Q14). Um `refine` não roda
+ * depois do erro de tipo.
+ */
+export const CAMPO_OBRIGATORIO = { error: MOTIVO_OBRIGATORIO, abort: true } as const;
+
 /**
  * Objeto que recusa campo desconhecido (CA-13). Todo esquema de corpo ou de
  * consulta HTTP usa esta função, não `z.object`. Respostas lidas por clientes

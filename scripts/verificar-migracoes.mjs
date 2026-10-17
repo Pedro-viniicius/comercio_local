@@ -13,7 +13,10 @@
 // - RLS desligado (`DISABLE` ou `NO FORCE ROW LEVEL SECURITY`) e trigger desligada
 //   (`DISABLE TRIGGER`, `ENABLE REPLICA TRIGGER`, `session_replication_role`), em qualquer
 //   pasta: não há migração que precise disso sem revisão à parte;
-// - `GRANT` para `PUBLIC`, `anon`, `authenticated` ou `service_role` (papéis do Supabase);
+// - `GRANT` para papel que não seja `bairrin_app` nem `bairrin_migracao` (P8 do 01b): `PUBLIC`,
+//   `anon`, `authenticated` e `service_role` (papéis do Supabase), `postgres`, `supabase_*`,
+//   `CURRENT_USER`, `SESSION_USER`, `CURRENT_ROLE`, papel qualquer e papel montado em tempo de
+//   execução (`format('... TO %I', ...)`);
 // - `GRANT` de `UPDATE`, `DELETE`, `TRUNCATE` ou `ALL` em tabela somente-acréscimo
 //   (`compartilhado.auditoria`), inclusive por `ON ALL TABLES IN SCHEMA compartilhado`;
 // - função ou procedimento `SECURITY DEFINER` sem `SET search_path` no mesmo comando;
@@ -148,6 +151,12 @@ const GRANT = /\bGRANT\b([^;]*?)\bTO\b([^;]*)/gi;
 
 /** Papéis que nunca recebem privilégio: todo mundo e os papéis da Data API do Supabase. */
 const PAPEIS_SEM_PRIVILEGIO = new Set(['public', 'anon', 'authenticated', 'service_role']);
+
+/**
+ * Únicos papéis que recebem privilégio numa migração (P8 do 01b): a aplicação e o papel de
+ * migração. Comparados depois de normalizar (`"bairrin_app"` passa; `"BAIRRIN_APP"` é outro).
+ */
+const PAPEIS_COM_PRIVILEGIO = new Set(['bairrin_app', 'bairrin_migracao']);
 
 /** Tabelas somente-acréscimo: nenhum papel recebe UPDATE, DELETE nem TRUNCATE nelas (S3). */
 export const TABELAS_SOMENTE_ACRESCIMO = ['compartilhado.auditoria'];
@@ -586,6 +595,30 @@ function listaDeNomes(trecho) {
     .map(separarNome);
 }
 
+/**
+ * Papéis de `GRANT ... TO <papéis>` (visão `codigo`), normalizados, cada um com `GROUP`
+ * opcional, até o que vem depois da lista (`WITH GRANT OPTION`, `GRANTED BY`). Papel que não é
+ * um nome (`%I` de `format`, texto montado) vira `undefined`: não dá para conferir quem recebe.
+ */
+function papeisDoGrant(destino) {
+  const papeis = [];
+  const papel = new RegExp(String.raw`^\s*(?:GROUP\s+)?(${IDENTIFICADOR})`, 'i');
+  let resto = destino;
+  for (;;) {
+    const achado = papel.exec(resto);
+    if (achado === null) {
+      papeis.push(undefined);
+      break;
+    }
+    papeis.push(normalizarIdentificador(achado[1]));
+    resto = resto.slice(achado[0].length);
+    const virgula = /^\s*,/.exec(resto);
+    if (virgula === null) break;
+    resto = resto.slice(virgula[0].length);
+  }
+  return papeis;
+}
+
 /** `GRANT ... ON <objetos>` alcança uma tabela somente-acréscimo? */
 function alcancaSomenteAcrescimo(objetos) {
   const emSchema = /^\s*ALL\s+TABLES\s+IN\s+SCHEMA\s+([\s\S]*)$/i.exec(objetos);
@@ -788,14 +821,24 @@ function analisarTrecho(visoes, dinamico) {
 
   for (const ocorrencia of codigo.matchAll(GRANT)) {
     const [, alvo, destino] = ocorrencia;
-    const papeis = listaDeNomes(destino.replace(/^\s*GROUP\s+/i, '')).map(({ nome }) => nome);
-    for (const papel of papeis.filter((nome) => PAPEIS_SEM_PRIVILEGIO.has(nome))) {
-      problemas.push({
-        linha: linha(ocorrencia.index),
-        mensagem:
+    const destinos = papeisDoGrant(destino);
+    const papeis = destinos.filter((nome) => nome !== undefined);
+    for (const papel of destinos.filter((nome) => !PAPEIS_COM_PRIVILEGIO.has(nome))) {
+      let mensagem;
+      if (papel === undefined) {
+        mensagem =
+          'GRANT para papel montado em tempo de execução (P8): não dá para conferir quem ' +
+          'recebe; escreva o nome (bairrin_app ou bairrin_migracao) no texto';
+      } else if (PAPEIS_SEM_PRIVILEGIO.has(papel)) {
+        mensagem =
           `GRANT para ${papel} (S2): PUBLIC e os papéis do Supabase (anon, authenticated, ` +
-          `service_role) não recebem privilégio${sufixo}`,
-      });
+          'service_role) não recebem privilégio';
+      } else {
+        mensagem =
+          `GRANT para ${papel} (P8): só bairrin_app e bairrin_migracao recebem privilégio ` +
+          'em migração';
+      }
+      problemas.push({ linha: linha(ocorrencia.index), mensagem: mensagem + sufixo });
     }
     const separado = /^([\s\S]*?)\bON\b([\s\S]*)$/i.exec(alvo);
     if (!separado) {

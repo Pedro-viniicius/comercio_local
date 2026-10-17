@@ -1,6 +1,7 @@
 // Integração da migração do núcleo (CA-F4; S2 e S3): o banco de teste foi
 // recriado e migrado pelo `globalSetup` (preparar-banco.ts) com o papel de
 // migração. Aqui se confere o resultado com os dois papéis de verdade.
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -637,11 +638,15 @@ describe('catálogo conferido no release (S33)', () => {
   });
 
   it('reprova WITH GRANT OPTION para a aplicação em função e tipo (S34, QA)', async () => {
+    // O REVOKE de PUBLIC deixa só a regra do GRANT OPTION: o primeiro GRANT grava
+    // na ACL o EXECUTE e o USAGE que PUBLIC tem por padrão (P8).
     expect(
       await problemasCom([
         `CREATE FUNCTION ${SCHEMA}.repassavel() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+        `REVOKE EXECUTE ON FUNCTION ${SCHEMA}.repassavel() FROM PUBLIC`,
         `GRANT EXECUTE ON FUNCTION ${SCHEMA}.repassavel() TO bairrin_app WITH GRANT OPTION`,
         `CREATE TYPE ${SCHEMA}.repassavel AS ENUM ('a')`,
+        `REVOKE USAGE ON TYPE ${SCHEMA}.repassavel FROM PUBLIC`,
         `GRANT USAGE ON TYPE ${SCHEMA}.repassavel TO bairrin_app WITH GRANT OPTION`,
       ]),
     ).toEqual([
@@ -656,6 +661,7 @@ describe('catálogo conferido no release (S33)', () => {
         ...tabelaCerta('sem_repasse'),
         `GRANT SELECT ON ${SCHEMA}.sem_repasse TO bairrin_app`,
         `CREATE FUNCTION ${SCHEMA}.sem_repasse() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+        `REVOKE EXECUTE ON FUNCTION ${SCHEMA}.sem_repasse() FROM PUBLIC`,
         `GRANT EXECUTE ON FUNCTION ${SCHEMA}.sem_repasse() TO bairrin_app`,
         `GRANT USAGE ON SCHEMA ${SCHEMA} TO bairrin_app`,
       ]),
@@ -692,14 +698,19 @@ describe('catálogo conferido no release (S33)', () => {
       await admin?.end();
     });
 
-    async function problemasComoAdmin(sql: readonly string[]): Promise<ProblemaNoCatalogo[]> {
+    /** Executa o SQL numa transação do `postgres`, confere dentro dela e desfaz tudo no fim. */
+    async function comoAdmin<T>(sql: readonly string[], conferir: () => Promise<T>): Promise<T> {
       await admin.query('BEGIN');
       try {
         for (const comando of sql) await admin.query(comando);
-        return await problemasNoCatalogo(admin, { schemas: [SCHEMA] });
+        return await conferir();
       } finally {
         await admin.query('ROLLBACK');
       }
+    }
+
+    async function problemasComoAdmin(sql: readonly string[]): Promise<ProblemaNoCatalogo[]> {
+      return comoAdmin(sql, () => problemasNoCatalogo(admin, { schemas: [SCHEMA] }));
     }
 
     it('reprova schema cujo dono é a aplicação', async () => {
@@ -709,12 +720,310 @@ describe('catálogo conferido no release (S33)', () => {
       ]);
     });
 
+    it('fora da regra do P8: o banco, o privilégio padrão de outro papel e a ACL de objeto de outro dono', async () => {
+      // A tabela do `postgres` num schema de bairrin_migracao não passa mais calada
+      // (R29, S76): o P8 só confere objeto de bairrin_migracao, e ela cai em
+      // `dono-fora-dos-papeis`. A entrada do dono e o GRANT para a aplicação não
+      // viram problema do P8. Fica antes do privilégio padrão, que alcançaria a
+      // tabela criada depois dele.
+      expect(
+        await problemasComoAdmin([
+          'GRANT CONNECT ON DATABASE bairrin_teste TO PUBLIC',
+          `CREATE TABLE ${SCHEMA}.do_postgres (x int)`,
+          `ALTER TABLE ${SCHEMA}.do_postgres ENABLE ROW LEVEL SECURITY`,
+          `GRANT SELECT ON ${SCHEMA}.do_postgres TO bairrin_app`,
+          `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA ${SCHEMA} GRANT SELECT ON TABLES TO PUBLIC`,
+        ]),
+      ).toEqual([{ regra: 'dono-fora-dos-papeis', objeto: `relação ${SCHEMA}.do_postgres` }]);
+    });
+
+    it('reprova relação, função e tipo de outro dono em schema de bairrin_migracao (R29, S76)', async () => {
+      // O tipo de linha da tabela e o de array do enum vêm junto: um problema por objeto.
+      expect(
+        await problemasComoAdmin([
+          `CREATE TABLE ${SCHEMA}.tabela_de_fora (x int)`,
+          `ALTER TABLE ${SCHEMA}.tabela_de_fora ENABLE ROW LEVEL SECURITY`,
+          `CREATE FUNCTION ${SCHEMA}.funcao_de_fora() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+          `CREATE TYPE ${SCHEMA}.tipo_de_fora AS ENUM ('a')`,
+          // O mesmo objeto, de bairrin_migracao: não é apontado.
+          `CREATE TABLE ${SCHEMA}.tabela_do_dono (x int)`,
+          `ALTER TABLE ${SCHEMA}.tabela_do_dono ENABLE ROW LEVEL SECURITY`,
+          `ALTER TABLE ${SCHEMA}.tabela_do_dono OWNER TO bairrin_migracao`,
+        ]),
+      ).toEqual([
+        { regra: 'dono-fora-dos-papeis', objeto: `função ${SCHEMA}.funcao_de_fora()` },
+        { regra: 'dono-fora-dos-papeis', objeto: `relação ${SCHEMA}.tabela_de_fora` },
+        { regra: 'dono-fora-dos-papeis', objeto: `tipo ${SCHEMA}.tipo_de_fora` },
+      ]);
+    });
+
+    it('public de outro dono com USAGE para papéis da plataforma passa; anon e authenticated ainda são barrados (R29, S76)', async () => {
+      // Simula o `public` do Supabase depois do checklist: dono pg_database_owner, USAGE
+      // para `postgres` e `service_role`. Os papéis criados aqui somem no ROLLBACK.
+      const plataforma = [
+        'CREATE ROLE anon NOLOGIN',
+        'CREATE ROLE authenticated NOLOGIN',
+        'CREATE ROLE service_role NOLOGIN',
+        'GRANT USAGE, CREATE ON SCHEMA public TO postgres',
+        'GRANT USAGE ON SCHEMA public TO service_role',
+      ];
+      const conferir = async () => {
+        const schemas = await schemasDoBairrin(dono);
+        return {
+          problemas: await problemasNoCatalogo(admin, { schemas }),
+          acessos: await acessosIndevidos(admin, undefined, schemas),
+        };
+      };
+      expect(await schemasDoBairrin(dono)).toContain('public');
+      expect(await comoAdmin(plataforma, conferir)).toEqual({ problemas: [], acessos: [] });
+      expect(
+        (await comoAdmin([...plataforma, 'GRANT USAGE ON SCHEMA public TO PUBLIC'], conferir))
+          .acessos,
+      ).toEqual([
+        { papel: 'anon', schema: 'public' },
+        { papel: 'authenticated', schema: 'public' },
+      ]);
+    });
+
+    it('objeto de plataforma, de outro dono, em schema que não é de bairrin_migracao não vira dono-fora-dos-papeis (R29, S76)', async () => {
+      // O `public` do Supabase tem dono diferente de bairrin_migracao: os objetos que a
+      // plataforma põe nele (tabela, função, tipo, com GRANT a outro papel) ficam fora da
+      // regra, que só vale em schema de bairrin_migracao. Sem o filtro pelo dono do
+      // schema, o release pararia no Supabase.
+      const plataforma = [
+        'CREATE ROLE service_role NOLOGIN',
+        'CREATE TABLE public.da_plataforma (x int)',
+        'ALTER TABLE public.da_plataforma ENABLE ROW LEVEL SECURITY',
+        'GRANT SELECT ON public.da_plataforma TO service_role',
+        "CREATE FUNCTION public.da_plataforma() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = '' AS 'SELECT 1'",
+        "CREATE TYPE public.tipo_da_plataforma AS ENUM ('a')",
+      ];
+      const problemas = () => problemasNoCatalogo(admin, { schemas: ['public'] });
+      expect(await comoAdmin(plataforma, problemas)).toEqual([]);
+    });
+
+    it('o privilégio padrão de bairrin_migracao continua conferido, mesmo criado por outro papel', async () => {
+      expect(
+        await problemasComoAdmin([
+          `ALTER DEFAULT PRIVILEGES FOR ROLE bairrin_migracao IN SCHEMA ${SCHEMA} GRANT SELECT ON TABLES TO PUBLIC`,
+        ]),
+      ).toEqual([
+        {
+          regra: 'privilegio-para-outro-papel',
+          objeto: 'privilégio padrão de bairrin_migracao para PUBLIC',
+        },
+      ]);
+    });
+
+    it('bairrin_migracao recebe privilégio em objeto de outro dono sem ser apontado (QA)', async () => {
+      expect(
+        await problemasComoAdmin([
+          `CREATE TABLE ${SCHEMA}.do_postgres_para_migracao (x int)`,
+          `ALTER TABLE ${SCHEMA}.do_postgres_para_migracao ENABLE ROW LEVEL SECURITY`,
+          `GRANT SELECT ON ${SCHEMA}.do_postgres_para_migracao TO bairrin_migracao, bairrin_app`,
+          `GRANT USAGE ON SCHEMA ${SCHEMA} TO bairrin_migracao`,
+        ]),
+        // Nenhum `privilegio-para-outro-papel`: o dono de fora é o único problema (R29).
+      ).toEqual([
+        {
+          regra: 'dono-fora-dos-papeis',
+          objeto: `relação ${SCHEMA}.do_postgres_para_migracao`,
+        },
+      ]);
+    });
+
+    it('papel que é membro da aplicação não herda a permissão dela: é outro papel (QA)', async () => {
+      expect(
+        await problemasComoAdmin([
+          'CREATE ROLE qa_membro_da_app NOLOGIN IN ROLE bairrin_app',
+          `CREATE TABLE ${SCHEMA}.do_membro (x int)`,
+          `ALTER TABLE ${SCHEMA}.do_membro ENABLE ROW LEVEL SECURITY`,
+          // O P8 só confere objeto de bairrin_migracao (R29).
+          `ALTER TABLE ${SCHEMA}.do_membro OWNER TO bairrin_migracao`,
+          `GRANT SELECT ON ${SCHEMA}.do_membro TO qa_membro_da_app`,
+        ]),
+      ).toEqual([
+        {
+          regra: 'privilegio-para-outro-papel',
+          objeto: `relação ${SCHEMA}.do_membro para qa_membro_da_app`,
+        },
+      ]);
+    });
+
     it('reprova WITH GRANT OPTION para a aplicação no banco', async () => {
       expect(
         await problemasComoAdmin([
           'GRANT CONNECT ON DATABASE bairrin_teste TO bairrin_app WITH GRANT OPTION',
         ]),
       ).toEqual([{ regra: 'grant-option-da-aplicacao', objeto: 'banco bairrin_teste' }]);
+    });
+  });
+
+  describe('privilégio só para bairrin_app e bairrin_migracao (P8)', () => {
+    const outroPapel = (objeto: string) => ({ regra: 'privilegio-para-outro-papel', objeto });
+
+    it('reprova GRANT para papel de fora (simulado e postgres), sem apontar o dono', async () => {
+      const sql = [
+        ...tabelaCerta('de_fora'),
+        `GRANT SELECT ON ${SCHEMA}.de_fora TO bairrin_app`,
+        `GRANT UPDATE (x) ON ${SCHEMA}.de_fora TO bairrin_app`,
+      ];
+      // Sem bairrin_app na lista, ele faz o papel de um papel estranho; só o
+      // schema do teste, porque o núcleo também dá privilégio a ele.
+      expect(
+        await problemasCom(sql, {
+          schemas: [SCHEMA],
+          papeisPermitidos: ['bairrin_migracao', 'papel_que_nao_existe'],
+        }),
+      ).toEqual([
+        outroPapel(`coluna ${SCHEMA}.de_fora.x para bairrin_app`),
+        outroPapel(`relação ${SCHEMA}.de_fora para bairrin_app`),
+      ]);
+      expect(await problemasCom(sql)).toEqual([]);
+      expect(
+        await problemasCom([
+          ...tabelaCerta('para_postgres'),
+          `GRANT SELECT ON ${SCHEMA}.para_postgres TO bairrin_app, postgres`,
+        ]),
+      ).toEqual([outroPapel(`relação ${SCHEMA}.para_postgres para postgres`)]);
+    });
+
+    it('reprova USAGE de schema para PUBLIC', async () => {
+      expect(await problemasCom([`GRANT USAGE ON SCHEMA ${SCHEMA} TO PUBLIC`])).toEqual([
+        outroPapel(`schema ${SCHEMA} para PUBLIC`),
+      ]);
+    });
+
+    it('reprova EXECUTE de função para PUBLIC, também o que o primeiro GRANT grava na ACL', async () => {
+      const funcao = (nome: string) =>
+        `CREATE FUNCTION ${SCHEMA}.${nome}() RETURNS int LANGUAGE sql AS 'SELECT 1'`;
+      expect(
+        await problemasCom([
+          funcao('publica'),
+          `GRANT EXECUTE ON FUNCTION ${SCHEMA}.publica() TO PUBLIC`,
+          funcao('so_app'),
+          `GRANT EXECUTE ON FUNCTION ${SCHEMA}.so_app() TO bairrin_app`,
+          funcao('fechada'),
+          `REVOKE EXECUTE ON FUNCTION ${SCHEMA}.fechada() FROM PUBLIC`,
+          `GRANT EXECUTE ON FUNCTION ${SCHEMA}.fechada() TO bairrin_app`,
+          `CREATE TYPE ${SCHEMA}.tipo_aberto AS ENUM ('a')`,
+          `GRANT USAGE ON TYPE ${SCHEMA}.tipo_aberto TO bairrin_app`,
+        ]),
+      ).toEqual([
+        outroPapel(`função ${SCHEMA}.publica() para PUBLIC`),
+        outroPapel(`função ${SCHEMA}.so_app() para PUBLIC`),
+        outroPapel(`tipo ${SCHEMA}.tipo_aberto para PUBLIC`),
+      ]);
+    });
+
+    it('reprova função SECURITY DEFINER com ACL nula, que dá EXECUTE a PUBLIC (S72)', async () => {
+      // Só a SECURITY DEFINER: a função comum com ACL nula continua fora da regra.
+      expect(
+        await problemasCom([
+          `CREATE FUNCTION ${SCHEMA}.definidora() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = '' AS 'SELECT 1'`,
+          `CREATE FUNCTION ${SCHEMA}.comum() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+        ]),
+      ).toEqual([outroPapel(`função ${SCHEMA}.definidora() para PUBLIC`)]);
+    });
+
+    it('a função SECURITY DEFINER com REVOKE de PUBLIC e GRANT para a aplicação passa (S72)', async () => {
+      expect(
+        await problemasCom([
+          `CREATE FUNCTION ${SCHEMA}.definidora() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = '' AS 'SELECT 1'`,
+          `REVOKE EXECUTE ON FUNCTION ${SCHEMA}.definidora() FROM PUBLIC`,
+          `GRANT EXECUTE ON FUNCTION ${SCHEMA}.definidora() TO bairrin_app`,
+          `CREATE FUNCTION ${SCHEMA}.so_do_dono() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = '' AS 'SELECT 1'`,
+          `REVOKE ALL ON FUNCTION ${SCHEMA}.so_do_dono() FROM PUBLIC`,
+        ]),
+      ).toEqual([]);
+    });
+
+    it('reprova privilégio padrão do dono para PUBLIC e para papel de fora', async () => {
+      expect(
+        await problemasCom([
+          `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT SELECT ON TABLES TO PUBLIC`,
+        ]),
+      ).toEqual([outroPapel('privilégio padrão de bairrin_migracao para PUBLIC')]);
+      expect(
+        await problemasCom(
+          [`ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT SELECT ON TABLES TO bairrin_app`],
+          { schemas: [SCHEMA], papeisPermitidos: ['bairrin_migracao'] },
+        ),
+      ).toEqual([outroPapel('privilégio padrão de bairrin_migracao para bairrin_app')]);
+    });
+
+    /** Os objetos de cada problema, em ordem: a consulta não promete ordem. */
+    const objetos = (problemas: ProblemaNoCatalogo[]) =>
+      problemas.map((problema) => problema.objeto).sort();
+
+    it('reprova coluna e sequência para PUBLIC, com o objeto certo (QA)', async () => {
+      expect(
+        objetos(
+          await problemasCom([
+            ...tabelaCerta('com_coluna'),
+            `GRANT SELECT (x) ON ${SCHEMA}.com_coluna TO PUBLIC`,
+            `CREATE SEQUENCE ${SCHEMA}.contador`,
+            `GRANT USAGE ON SEQUENCE ${SCHEMA}.contador TO PUBLIC`,
+          ]),
+        ),
+      ).toEqual([
+        `coluna ${SCHEMA}.com_coluna.x para PUBLIC`,
+        `relação ${SCHEMA}.contador para PUBLIC`,
+      ]);
+    });
+
+    it('o privilégio padrão sem IN SCHEMA, do dono, para PUBLIC também reprova (QA)', async () => {
+      expect(
+        await problemasCom(['ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO PUBLIC']),
+      ).toEqual([outroPapel('privilégio padrão de bairrin_migracao para PUBLIC')]);
+    });
+
+    describe('modelo da migração da identidade (o mesmo arquivo que o verificador lê)', () => {
+      const modelo = readFileSync(
+        new URL(
+          '../../../../scripts/fixtures/migracoes/identidade-modelo/20261020000000_identidade_qa/migration.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      );
+
+      it('executa como bairrin_migracao e o catálogo fica dentro das regras', async () => {
+        expect(await problemasCom([modelo])).toEqual([]);
+      });
+
+      it('sem os REVOKE ... FROM PUBLIC, o catálogo aponta a função e o tipo (o verificador não vê)', async () => {
+        const semRevoke = modelo.replaceAll(/^REVOKE .*$/gm, '');
+        expect(objetos(await problemasCom([semRevoke]))).toEqual([
+          'função identidade_qa.email_da_conta(uuid) para PUBLIC',
+          'tipo identidade_qa.PapelDaConta para PUBLIC',
+        ]);
+      });
+    });
+
+    it('o REVOKE em todas as funções do schema, e em tipo e domínio, deixa o GRANT passar (QA)', async () => {
+      const objetosDeIdentidade = (revogar: boolean) => [
+        `CREATE FUNCTION ${SCHEMA}.uma() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+        `CREATE FUNCTION ${SCHEMA}.outra(a int) RETURNS int LANGUAGE sql AS 'SELECT 2'`,
+        `CREATE TYPE ${SCHEMA}.papel AS ENUM ('a')`,
+        `CREATE DOMAIN ${SCHEMA}.codigo AS text`,
+        ...(revogar
+          ? [
+              `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ${SCHEMA} FROM PUBLIC`,
+              `REVOKE USAGE ON TYPE ${SCHEMA}.papel FROM PUBLIC`,
+              `REVOKE USAGE ON DOMAIN ${SCHEMA}.codigo FROM PUBLIC`,
+            ]
+          : []),
+        `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${SCHEMA} TO bairrin_app`,
+        `GRANT USAGE ON TYPE ${SCHEMA}.papel TO bairrin_app`,
+        `GRANT USAGE ON DOMAIN ${SCHEMA}.codigo TO bairrin_app`,
+      ];
+      expect(await problemasCom(objetosDeIdentidade(true))).toEqual([]);
+      expect(objetos(await problemasCom(objetosDeIdentidade(false)))).toEqual([
+        `função ${SCHEMA}.outra(integer) para PUBLIC`,
+        `função ${SCHEMA}.uma() para PUBLIC`,
+        `tipo ${SCHEMA}.codigo para PUBLIC`,
+        `tipo ${SCHEMA}.papel para PUBLIC`,
+      ]);
     });
   });
 

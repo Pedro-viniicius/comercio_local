@@ -39,6 +39,31 @@ describe('consulta paginada', () => {
     expect(consultaPaginadaSchema.safeParse({ cursor: 'a'.repeat(513) }).success).toBe(false);
   });
 
+  it('cursor vazio é "obrigatorio" e cursor longo tem motivo próprio', () => {
+    const erros = (cursor: string) => {
+      const resultado = consultaPaginadaSchema.safeParse({ cursor });
+      if (resultado.success) throw new Error('esperava falha');
+      return camposDoErroZod(resultado.error);
+    };
+    expect(erros('')).toEqual([
+      { campo: 'cursor', codigo: 'obrigatorio', motivo: 'Campo obrigatório.' },
+    ]);
+    expect(erros('a'.repeat(513))).toEqual([
+      { campo: 'cursor', codigo: 'invalido', motivo: 'Cursor inválido' },
+    ]);
+  });
+
+  it.each([
+    ['lista vazia', []],
+    ['lista de 600 itens', Array.from({ length: 600 }, () => 'a')],
+    ['objeto com length 0', { length: 0 }],
+  ])('cursor que não é texto (%s) gera um erro só (Q14)', (_caso, cursor) => {
+    const resultado = consultaPaginadaSchema.safeParse({ cursor });
+    if (resultado.success) throw new Error('esperava falha');
+    const erros = camposDoErroZod(resultado.error);
+    expect(erros.map(({ campo, codigo }) => [campo, codigo])).toEqual([['cursor', 'invalido']]);
+  });
+
   it('recusa parâmetro desconhecido, com campo em português', () => {
     const resultado = consultaPaginadaSchema.safeParse({ pagina: '2' });
     if (resultado.success) throw new Error('esperava falha');

@@ -4,5 +4,6 @@
 
 - Arquivos `viola-*.ts` violam exatamente uma regra.
 - Os demais são controles: dependências permitidas que não podem ser reprovadas.
-- Tudo compila (typecheck e lint cobrem a pasta). A única exceção declarada é o import de `@bairrin/contratos/validadores`, que ainda não existe e leva `@ts-expect-error`.
+- Tudo compila (typecheck e lint cobrem a pasta). A única exceção declarada é `viola-contratos-outro-subcaminho.ts`, que importa de propósito um subcaminho inexistente de `@bairrin/contratos` e leva `@ts-expect-error`.
+- `usa-validadores-nao-resolvido.ts` importa `@bairrin/contratos/validadores` pelo nome do pacote, que resolve para o fonte real do pacote (fora desta pasta); `usa-pacote-permitido.ts` importa a cópia mínima em `packages/contratos/src/validadores/` desta pasta pelo caminho relativo.
 - O `pnpm deps:verificar` ignora esta pasta (`exclude` do `.dependency-cruiser.cjs`).

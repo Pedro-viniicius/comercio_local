@@ -1,2 +1,2 @@
 - [Como rodar testes](como-rodar-testes.md) — comandos isolados, sondas, cópia com código antigo, singleton do nestjs-pino, sonda no Postgres de teste
-- [Estado após a rodada 2 do grupo 0 do 01b](verificador-migracoes-e-logs-lacunas.md) — Q5-Q11, S33-S36 fechados; mutação cobre catálogo e SET ROLE; lacunas baixas
+- [Estado do verificador, logs e senhas (01b, grupo 0 e A)](verificador-migracoes-e-logs-lacunas.md) — Q5-Q16 e S33-S36, S70-S76 fechados; mutação; lacunas baixas

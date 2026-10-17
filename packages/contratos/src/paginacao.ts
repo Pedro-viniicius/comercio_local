@@ -1,9 +1,10 @@
 // Paginação por cursor (`?cursor=&limite=`, máximo 20, CA-39).
-import { objetoEstrito, z } from './zod.ts';
+import { CAMPO_OBRIGATORIO, ehTextoPreenchido, objetoEstrito, z } from './zod.ts';
 
 export const LIMITE_MAXIMO_DA_PAGINA = 20;
 export const LIMITE_PADRAO_DA_PAGINA = 20;
 const TAMANHO_MAXIMO_DO_CURSOR = 512;
+export const MOTIVO_CURSOR_INVALIDO = 'Cursor inválido';
 
 /**
  * Campos de consulta da paginação. Uma rota que também filtra compõe:
@@ -12,7 +13,14 @@ const TAMANHO_MAXIMO_DO_CURSOR = 512;
  * é recusado (400), não cortado em silêncio.
  */
 export const formaDaPaginacao = {
-  cursor: z.string().min(1).max(TAMANHO_MAXIMO_DO_CURSOR).optional(),
+  // `refine`, não `.min`/`.max`: um erro só se vier lista no lugar do texto (Q14, `zod.ts`).
+  cursor: z
+    .string()
+    .refine(ehTextoPreenchido, CAMPO_OBRIGATORIO)
+    .refine((cursor) => cursor.length <= TAMANHO_MAXIMO_DO_CURSOR, {
+      error: MOTIVO_CURSOR_INVALIDO,
+    })
+    .optional(),
   limite: z.coerce
     .number()
     .int()

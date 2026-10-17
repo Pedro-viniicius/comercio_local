@@ -4,6 +4,9 @@
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Socket } from 'node:net';
 import { Writable } from 'node:stream';
+// O alias é proibido no código da API (S71); aqui os dois `Logger` (o do Nest e o do
+// nestjs-pino) convivem com o tipo `Logger` do pino.
+// eslint-disable-next-line no-restricted-syntax
 import { Logger as LoggerDoNestCommon } from '@nestjs/common';
 import { Logger as LoggerDoNest, PinoLogger } from 'nestjs-pino';
 import type { Logger } from 'pino';
@@ -17,6 +20,7 @@ import {
   serializarErro,
   serializarRequisicao,
   serializarResposta,
+  TEXTO_DESCARTADO,
   TEXTO_SEM_MENSAGEM,
 } from './logger.ts';
 import { VALOR_REDIGIDO } from './redator.ts';
@@ -390,6 +394,8 @@ describe('caminhos reais do `Logger` do `@nestjs/common` no Nest 12 (R13, S35b)'
   it('hooks de encerramento (`Logger.error(err, err?.stack)` estático): a pilha não vira o contexto', () => {
     const erro = new Error(EMAIL);
     comLoggerDoNestjsPino(() => {
+      // A chamada do Nest, reproduzida: no código da API o lint a reprova (S70).
+      // eslint-disable-next-line no-restricted-syntax
       LoggerDoNestCommon.error(erro, erro.stack);
     });
     expect(doNestjsPino.texto()).not.toContain(EMAIL);
@@ -464,6 +470,10 @@ describe('contexto do nestjs-pino só como texto curto de uma linha (S35b)', () 
     ['com 81 caracteres', `${EMAIL}${'x'.repeat(81 - EMAIL.length)}`],
     ['que não é texto', { email: EMAIL }],
     ['número', 35988887777],
+    // P8: só nome de identificador (`^[A-Za-z][\w.:-]*$`).
+    ['com e-mail', EMAIL],
+    ['com espaço', 'Contas com espaço'],
+    ['só com dígitos', '9999'],
   ])('contexto %s vira o valor fixo', (_caso, contexto) => {
     const { logger, texto, registros } = criarLogger();
     logger.error({ context: contexto, err: new Error(EMAIL) }, 'falha');
@@ -500,6 +510,76 @@ describe('contexto do nestjs-pino só como texto curto de uma linha (S35b)', () 
     ]);
     expect(registros()[2]).not.toHaveProperty('context');
   });
+
+  it.each([
+    ['com acento', 'Autenticação'],
+    ['com 81 letras', 'C'.repeat(81)],
+    ['começando por sublinhado', '_Contas'],
+    ['com arroba', 'ana@exemplo'],
+    ['com barra', 'identidade/contas'],
+    ['com parênteses', 'Contas(35988887777)'],
+    ['vazio', ''],
+    ['null', null],
+    ['lista', ['Contas']],
+    ['objeto String', new String('Contas')],
+    ['com quebra de linha só no fim', 'Contas\n'],
+    ['com NBSP', 'Contas\u00a0Lojas'],
+    ['com letra fora do ASCII (cirílico)', 'Сontas'],
+  ])('contexto %s vira o valor fixo (QA, P8)', (_caso, contexto) => {
+    const { logger, registros } = criarLogger();
+    logger.info({ context: contexto }, 'texto');
+    expect(registros()).toMatchObject([{ context: CONTEXTO_DESCARTADO, msg: 'texto' }]);
+  });
+
+  it('contexto com 80 caracteres de identificador passa; com 81, não (QA, P8)', () => {
+    const { logger, registros } = criarLogger();
+    const oitenta = `A${'b'.repeat(79)}`;
+    const oitentaEUm = `A${'b'.repeat(80)}`;
+    logger.info({ context: oitenta }, 'oitenta');
+    logger.info({ context: oitentaEUm }, 'oitenta e um');
+    expect(registros()).toMatchObject([
+      { context: oitenta, msg: 'oitenta' },
+      { context: CONTEXTO_DESCARTADO, msg: 'oitenta e um' },
+    ]);
+  });
+
+  it('contexto de identificador passa como veio pelo Logger do nestjs-pino e a pilha como contexto, não (QA, P8)', () => {
+    doNestjsPino.limpar();
+    const logger = new LoggerDoNest(new PinoLogger(parametrosDoNestjsPino), parametrosDoNestjsPino);
+    logger.log('texto', 'Identidade.Sessoes:renovar');
+    const pilha = `Error: ${EMAIL}\n    at x (y.ts:1:1)`;
+    logger.error(new Error(EMAIL), pilha);
+    expect(doNestjsPino.texto()).not.toContain(EMAIL);
+    expect(doNestjsPino.registros()).toMatchObject([
+      { context: 'Identidade.Sessoes:renovar', msg: 'texto' },
+      { context: CONTEXTO_DESCARTADO },
+    ]);
+  });
+
+  // Q16: `child({ context })` e `setBindings({ context })` vão direto para a linha: só o redator
+  // por chave passa por eles, não a regra do contexto.
+  it('contexto com dado também é descartado quando vem de child() ou setBindings() (Q16)', () => {
+    const { logger, texto, registros } = criarLogger();
+    logger.child({ context: EMAIL }).info('filho');
+    const outro = logger.child({});
+    outro.setBindings({ context: '35988887777' });
+    outro.info('vinculado');
+    expect(texto()).not.toContain(EMAIL);
+    expect(texto()).not.toContain('35988887777');
+    expect(registros()).toMatchObject([
+      { context: CONTEXTO_DESCARTADO, msg: 'filho' },
+      { context: CONTEXTO_DESCARTADO, msg: 'vinculado' },
+    ]);
+  });
+
+  it.each(['ExceptionsHandler', 'Identidade.Sessoes:renovar', 'Contas', 'Lojas_v2-a'])(
+    'contexto com nome de identificador (%s) passa como veio (P8)',
+    (contexto) => {
+      const { logger, registros } = criarLogger();
+      logger.info({ context: contexto }, 'texto');
+      expect(registros()).toMatchObject([{ context: contexto, msg: 'texto' }]);
+    },
+  );
 });
 
 describe('pilha sem linhas que vêm da mensagem do erro (Q9)', () => {
@@ -522,8 +602,12 @@ describe('bordas do texto fixo do log (QA do grupo 0, Seg-1)', () => {
 
   it('erro com `cause` e `AggregateError`: nem a mensagem nem a causa nem os erros agregados vão', () => {
     const { logger, texto, registros } = criarLogger();
-    logger.error(new Error(`falha ${EMAIL}`, { cause: new Error(`causa ${EMAIL}`) }));
-    logger.error({ err: new AggregateError([new Error(EMAIL)], `agregado ${EMAIL}`) }, 'lote');
+    // Os erros são montados antes da chamada: a regra de lint do log (S70) não deixa template
+    // string em nenhum ponto dos argumentos.
+    const erroComCausa = new Error(`falha ${EMAIL}`, { cause: new Error(`causa ${EMAIL}`) });
+    const agregadoComDado = new AggregateError([new Error(EMAIL)], `agregado ${EMAIL}`);
+    logger.error(erroComCausa);
+    logger.error({ err: agregadoComDado }, 'lote');
     expect(texto()).not.toContain(EMAIL);
     const [comCausa, agregado] = registros();
     expect(comCausa).toMatchObject({ msg: TEXTO_SEM_MENSAGEM, err: { tipo: 'Error' } });
@@ -607,5 +691,123 @@ describe('bordas do texto fixo do log (QA do grupo 0, Seg-1)', () => {
     expect(interpolado).toMatchObject({ msg: 'conta %s' });
     expect(erro?.['idRequisicao']).toEqual(expect.any(String));
     expect(conclusao).toMatchObject({ msg: 'requisição concluída', res: { status: 200 } });
+  });
+});
+
+// S70 (defesa em profundidade): a regra de lint não vê texto montado fora da chamada
+// (`const texto = ...; logger.info(texto)`). O logger troca o texto final que tem cara de
+// e-mail (`@`), de telefone, CPF ou código (6 dígitos ou mais, seguidos ou com separador) ou
+// de pilha (quebra de linha) por um fixo.
+describe('texto do log com cara de dado pessoal vira texto fixo (S70)', () => {
+  const EMAIL = 'fulano@exemplo.com';
+  const TELEFONE = '35988887777';
+
+  it.each([
+    ['e-mail', `conta ${EMAIL} criada`],
+    ['só o `@`', 'texto com @ no meio'],
+    ['telefone', `contato ${TELEFONE}`],
+    ['CPF só com dígitos', 'documento 52998224725'],
+    ['código de 6 dígitos', 'código 123456 enviado'],
+    ['6 dígitos no começo', '123456'],
+    ['telefone com DDD entre parênteses e hífen', 'contato (35) 99876-5432'],
+    ['telefone com DDI e espaços', 'contato +55 35 99876 5432'],
+    ['CPF com pontos e hífen', 'documento 123.456.789-09'],
+    ['CNPJ com barra', 'loja 12.345.678/0001-95'],
+    ['código com espaços', 'código 12 34 56'],
+    // Falso positivo aceito: data com hífen tem 8 dígitos com separador, como um telefone.
+    ['data com hífen', 'versão 2026-10-16 do termo'],
+    ['quebra de linha `\\n`', 'primeira linha\nsegunda'],
+    ['retorno `\\r`', 'primeira linha\rsegunda'],
+    ['separador de linha U+2028', 'primeira linha\u2028segunda'],
+    ['separador de parágrafo U+2029', 'primeira linha\u2029segunda'],
+  ])('%s: o texto sai como `TEXTO_DESCARTADO`, na linha crua', (_caso, textoComDado) => {
+    const { logger, linhasCruas, registros } = criarLogger();
+    logger.info(textoComDado);
+    logger.warn({ contaId: 'c-1' }, textoComDado);
+    logger.child({ lojaId: 'l-1' }).error({ err: new Error('x') }, textoComDado);
+    const linhas = linhasCruas();
+    expect(linhas).toHaveLength(3);
+    for (const linha of linhas) {
+      expect(linha).not.toContain(textoComDado);
+      expect(linha).toContain(`"msg":"${TEXTO_DESCARTADO}"`);
+      expect(quantidadeDeMsg(linha)).toBe(1);
+    }
+    expect(registros()).toMatchObject([
+      { msg: TEXTO_DESCARTADO },
+      { contaId: 'c-1', msg: TEXTO_DESCARTADO },
+      { lojaId: 'l-1', msg: TEXTO_DESCARTADO, err: { tipo: 'Error' } },
+    ]);
+  });
+
+  it('a pilha do erro como texto (`error({ err }, erro.stack)`) vira `TEXTO_DESCARTADO` (S70)', () => {
+    const { logger, linhasCruas, registros } = criarLogger();
+    const erro = new Error('cadastro de Maria da Silva, Rua das Flores');
+    // Pilha fixa: a do Vitest traz `@` nos caminhos do pnpm e cairia na troca pelo `@`.
+    erro.stack =
+      'Error: cadastro de Maria da Silva, Rua das Flores\n' +
+      '    at Servico.criar (/app/dist/modulos/identidade/aplicacao/criar.js:10:11)';
+    // Montado antes da chamada, como o lint não vê: `logger.error({ err: erro }, erro.stack)`.
+    const pilha = erro.stack;
+    logger.error({ err: erro }, pilha);
+    const [linha] = linhasCruas();
+    expect(linha).not.toContain('Maria');
+    expect(quantidadeDeMsg(linha ?? '')).toBe(1);
+    expect(registros()).toMatchObject([
+      {
+        msg: TEXTO_DESCARTADO,
+        err: { tipo: 'Error', pilha: expect.stringMatching(/^\s+at\s/) as unknown },
+      },
+    ]);
+  });
+
+  it.each([
+    'conta criada',
+    'limpeza de retenção concluída',
+    'tentativa 12345 de 99999',
+    'tentativa 12 de 3',
+    'lote 1-2-3-4-5',
+    'requisição concluída',
+  ])(
+    'texto de uma linha, sem `@` e com menos de 6 dígitos juntos passa como veio: %s',
+    (textoFixo) => {
+      const { logger, registros } = criarLogger();
+      logger.info(textoFixo);
+      logger.info({ total: 1 }, textoFixo);
+      expect(registros()).toMatchObject([{ msg: textoFixo }, { total: 1, msg: textoFixo }]);
+    },
+  );
+
+  it('texto longo quase casando (5 dígitos e separadores) não trava o logger (sem ReDoS)', () => {
+    const { logger, registros } = criarLogger();
+    const textos = [
+      `${'1 '.repeat(4)}1${' '.repeat(50_000)}x`,
+      `${'1-2-3-4-5 x '.repeat(10_000)}`,
+      `1${'('.repeat(50_000)}`,
+    ];
+    const inicio = performance.now();
+    for (const texto of textos) logger.info(texto);
+    expect(performance.now() - inicio).toBeLessThan(1_000);
+    expect(registros()).toHaveLength(3);
+  });
+
+  it('o `Logger` do nestjs-pino e o `PinoLogger` também trocam o texto com dado', () => {
+    doNestjsPino.limpar();
+    const { linhasCruas, registros } = doNestjsPino;
+    const logger = new LoggerDoNest(new PinoLogger(parametrosDoNestjsPino), parametrosDoNestjsPino);
+    // Texto montado antes da chamada: o caso que a regra de lint não vê.
+    const textoComEmail = `conta ${EMAIL}`;
+    const textoComTelefone = `contato ${TELEFONE}`;
+    logger.log(textoComEmail, 'Contas');
+    const servico = new PinoLogger(parametrosDoNestjsPino);
+    servico.setContext('Pedidos');
+    servico.info({ pedidoId: 'p-1' }, textoComTelefone);
+    for (const linha of linhasCruas()) {
+      expect(linha).not.toContain(EMAIL);
+      expect(linha).not.toContain(TELEFONE);
+    }
+    expect(registros()).toMatchObject([
+      { context: 'Contas', msg: TEXTO_DESCARTADO },
+      { context: 'Pedidos', pedidoId: 'p-1', msg: TEXTO_DESCARTADO },
+    ]);
   });
 });

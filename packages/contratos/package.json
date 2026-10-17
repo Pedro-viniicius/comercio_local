@@ -9,6 +9,12 @@
       "react-native": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./validadores": {
+      "@bairrin/fonte": "./src/validadores/index.ts",
+      "react-native": "./src/validadores/index.ts",
+      "types": "./dist/validadores/index.d.ts",
+      "default": "./dist/validadores/index.js"
     }
   },
   "files": [

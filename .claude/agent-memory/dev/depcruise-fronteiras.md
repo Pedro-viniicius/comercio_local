@@ -18,4 +18,6 @@ Conferido em 2026-10-16 (etapa 12 do 01a, `.dependency-cruiser.cjs`, `apps/api/t
 
 - Regra `producao-nao-importa-test` (01b, 0b): fakes ficam em `apps/api/test/fakes/<contexto>/`; só `*.test.ts` de `src/` os importa. Fixture de teste pode viver em `fixtures/apps/api/test/...` (o `exclude` só pega `^apps/api/test/fronteiras/fixtures/` da raiz real). Fixture `*.test.ts` dentro das fixtures seria coletada pelo Vitest: prove exceções pela árvore real.
 
-**How to apply:** nova regra de fronteira, novo módulo em `modulos/`, subcaminho `@bairrin/contratos/validadores` (remover o `@ts-expect-error` da fixture `usa-validadores-nao-resolvido.ts`).
+- Subcaminho `@bairrin/contratos/validadores` existe desde o 01b/2: nas fixtures ele resolve via `apps/api/node_modules/@bairrin/contratos` para `../../../../../packages/contratos/src/validadores/index.ts` (a fixture mantém o nome antigo `usa-validadores-nao-resolvido.ts`).
+
+**How to apply:** nova regra de fronteira, novo módulo em `modulos/`, domínio importando validadores.

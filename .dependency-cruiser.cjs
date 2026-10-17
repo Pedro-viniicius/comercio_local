@@ -52,8 +52,9 @@ module.exports = {
       name: 'dominio-so-importa-validadores',
       comment:
         'O domínio só pode importar @bairrin/contratos/validadores: nenhum outro pacote do ' +
-        'workspace nem outro caminho de @bairrin/contratos. O subcaminho ainda não existe; ' +
-        'a exceção vale para quando existir (como arquivo do pacote ou como nome não resolvido).',
+        'workspace nem outro caminho de @bairrin/contratos. O subcaminho resolve para ' +
+        'packages/contratos/src/validadores/ (condição @bairrin/fonte); o nome não resolvido ' +
+        'também passa, porque um import que não resolve já reprova no typecheck.',
       severity: 'error',
       from: { path: DOMINIO },
       to: {

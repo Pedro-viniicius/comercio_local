@@ -908,6 +908,126 @@ describe('RLS, triggers, privilégios, funções e extensões (S27)', () => {
   });
 });
 
+describe('GRANT só para bairrin_app e bairrin_migracao (P8 do 01b)', () => {
+  /** Cada um reprova com exatamente estas mensagens, em qualquer pasta. */
+  const recusados = [
+    ['TO postgres', 'GRANT SELECT ON pedidos.itens TO postgres;', [/^GRANT para postgres \(P8\)/]],
+    [
+      'TO supabase_admin',
+      'GRANT USAGE ON SCHEMA pedidos TO supabase_admin;',
+      [/^GRANT para supabase_admin \(P8\)/],
+    ],
+    [
+      'TO CURRENT_USER',
+      'GRANT SELECT ON pedidos.itens TO CURRENT_USER;',
+      [/^GRANT para current_user \(P8\)/],
+    ],
+    [
+      'TO SESSION_USER',
+      'GRANT SELECT ON pedidos.itens TO SESSION_USER;',
+      [/^GRANT para session_user \(P8\)/],
+    ],
+    [
+      'TO CURRENT_ROLE',
+      'GRANT EXECUTE ON FUNCTION pedidos.f() TO CURRENT_ROLE;',
+      [/^GRANT para current_role \(P8\)/],
+    ],
+    [
+      'TO bairrin_app, postgres',
+      'GRANT SELECT ON pedidos.itens TO bairrin_app, postgres;',
+      [/^GRANT para postgres \(P8\)/],
+    ],
+    [
+      'TO um papel qualquer, com GROUP e em outra linha',
+      'GRANT SELECT\n  ON pedidos.itens\n  TO bairrin_migracao,\n  GROUP papel_qualquer;',
+      [/^GRANT para papel_qualquer \(P8\)/],
+    ],
+    [
+      'TO "BAIRRIN_APP" entre aspas e em maiúsculas é outro papel',
+      'GRANT SELECT ON pedidos.itens TO "BAIRRIN_APP";',
+      [/^GRANT para BAIRRIN_APP \(P8\)/],
+    ],
+    [
+      'TO PUBLIC continua com o motivo do S2',
+      'GRANT SELECT ON pedidos.itens TO bairrin_app, PUBLIC;',
+      [/^GRANT para public \(S2\)/],
+    ],
+    [
+      'TO postgres dentro de DO',
+      'DO $$ BEGIN GRANT SELECT ON pedidos.itens TO postgres; END $$;',
+      [/^GRANT para postgres \(P8\)/],
+    ],
+    [
+      'TO postgres dentro de EXECUTE',
+      "DO $$ BEGIN EXECUTE 'GRANT SELECT ON pedidos.itens TO postgres'; END $$;",
+      [/^GRANT para postgres \(P8\).*\(em SQL dinâmico\)$/],
+    ],
+    [
+      'TO supabase_admin dentro de EXECUTE format',
+      "DO $$ BEGIN EXECUTE format('GRANT SELECT ON %I.itens TO supabase_admin', 'pedidos'); END $$;",
+      [/^GRANT para supabase_admin \(P8\).*\(em SQL dinâmico\)$/],
+    ],
+    [
+      'TO CURRENT_USER e TO bairrin_app, postgres dentro de EXECUTE',
+      "DO $$ BEGIN EXECUTE 'GRANT USAGE ON SCHEMA pedidos TO CURRENT_USER'; EXECUTE 'GRANT SELECT ON pedidos.itens TO bairrin_app, postgres'; END $$;",
+      [/^GRANT para current_user \(P8\).*\(em SQL dinâmico\)$/, /^GRANT para postgres \(P8\)/],
+    ],
+    [
+      'papel montado em tempo de execução (%I)',
+      "DO $$ BEGIN EXECUTE format('GRANT SELECT ON pedidos.itens TO %I', 'bairrin_app'); END $$;",
+      [/^GRANT para papel montado em tempo de execução \(P8\).*\(em SQL dinâmico\)$/],
+    ],
+    [
+      'GRANT CREATE em schema para CURRENT_USER',
+      'GRANT CREATE ON SCHEMA pedidos TO CURRENT_USER;',
+      [/^GRANT para current_user \(P8\)/],
+    ],
+  ];
+  for (const [nome, comando, esperados] of recusados) {
+    it(`${nome}: recusado, mesmo em _destrutiva com guarda`, () => {
+      for (const [pasta, sql] of [
+        ['1_x', REVERSAO + comando],
+        ['1_x_destrutiva', REVERSAO + GUARDA + comando],
+      ]) {
+        const resultado = mensagens(pasta, sql);
+        assert.equal(resultado.length, esperados.length, `${pasta}\n${resultado.join('\n')}`);
+        esperados.forEach((esperado, indice) => assert.match(resultado[indice], esperado));
+      }
+    });
+  }
+
+  it('ALTER DEFAULT PRIVILEGES ... GRANT para postgres reprova pelas duas regras', () => {
+    const resultado = mensagens(
+      '1_x',
+      `${REVERSAO}ALTER DEFAULT PRIVILEGES IN SCHEMA pedidos GRANT SELECT ON TABLES TO postgres;`,
+    );
+    assert.equal(resultado.length, 2, resultado.join('\n'));
+    assert.ok(resultado.some((m) => /^GRANT para postgres \(P8\)/.test(m)));
+    assert.ok(resultado.some((m) => /^ALTER DEFAULT PRIVILEGES \.\.\. GRANT/.test(m)));
+  });
+
+  it('aceita GRANT só para os dois papéis do Bairrin, REVOKE de qualquer papel e texto que não executa', () => {
+    const aceitos = [
+      'GRANT SELECT ON pedidos.itens TO bairrin_app;',
+      'GRANT SELECT ON pedidos.itens TO "bairrin_app";',
+      'GRANT SELECT ON pedidos.itens TO bairrin_migracao;',
+      'GRANT SELECT ON pedidos.itens TO BAIRRIN_APP;',
+      'GRANT SELECT ON pedidos.itens TO GROUP bairrin_app;',
+      'GRANT SELECT ON pedidos.itens TO bairrin_app\n  , "bairrin_migracao";',
+      'GRANT USAGE ON SCHEMA pedidos TO bairrin_app;\nGRANT CREATE ON SCHEMA pedidos TO bairrin_migracao;',
+      "DO $$ BEGIN EXECUTE 'GRANT SELECT ON pedidos.itens TO bairrin_app'; END $$;",
+      "DO $$ BEGIN EXECUTE format('GRANT SELECT ON %I.itens TO bairrin_app', 'pedidos'); END $$;",
+      'REVOKE ALL ON SCHEMA pedidos FROM postgres, supabase_admin, CURRENT_USER;',
+      "DO $$ BEGIN RAISE NOTICE 'GRANT SELECT ON x TO postgres'; END $$;",
+      "COMMENT ON TABLE pedidos.itens IS 'nunca GRANT SELECT ON pedidos.itens TO postgres';",
+      '-- GRANT SELECT ON pedidos.itens TO postgres;\nSELECT 1;',
+    ];
+    for (const comando of aceitos) {
+      assert.deepEqual(mensagens('1_x', REVERSAO + comando), [], comando);
+    }
+  });
+});
+
 describe('migração parecida com a da identidade do 01b (QA do grupo 0): sem falso positivo e com o motivo certo', () => {
   const MIGRACAO = `-- reversao: DROP SCHEMA identidade CASCADE (só em banco sem dados).
 CREATE SCHEMA IF NOT EXISTS "identidade";
@@ -978,6 +1098,21 @@ CREATE TRIGGER "contas_toca" BEFORE UPDATE ON "identidade"."contas" FOR EACH ROW
       'GRANT de papel a papel',
       (sql) => `${sql}GRANT bairrin_migracao TO bairrin_app;\n`,
       [/^GRANT de papel sem ON/],
+    ],
+    [
+      'GRANT da tabela de contas também para postgres (P8)',
+      (sql) =>
+        sql.replace(
+          'ON "identidade"."contas" TO bairrin_app;',
+          'ON "identidade"."contas" TO bairrin_app, postgres;',
+        ),
+      [/^GRANT para postgres \(P8\)/],
+    ],
+    [
+      'GRANT para supabase_admin dentro de EXECUTE (P8)',
+      (sql) =>
+        `${sql}DO $$ BEGIN EXECUTE 'GRANT SELECT ON identidade.contas TO supabase_admin'; END $$;\n`,
+      [/^GRANT para supabase_admin \(P8\).*\(em SQL dinâmico\)$/],
     ],
     ['SET ROLE', (sql) => `${sql}SET ROLE postgres;\n`, [/^troca de papel \(SET ROLE\)/]],
     [
@@ -1138,5 +1273,201 @@ CREATE TRIGGER "contas_toca" BEFORE UPDATE ON "identidade"."contas" FOR EACH ROW
         posicao,
       );
     }
+  });
+});
+
+describe('GRANT só para bairrin_app e bairrin_migracao: bordas do QA (P8, grupo A)', () => {
+  const PASTA = '20261020000000_identidade';
+
+  /** Cada um reprova pelo P8 (ou pelo S2, no caso de PUBLIC), com o papel certo na mensagem. */
+  const recusados = [
+    [
+      'lista sem espaço depois da vírgula',
+      'GRANT SELECT ON identidade.t TO bairrin_app,postgres;',
+      'postgres',
+    ],
+    [
+      'espaço antes da vírgula',
+      'GRANT SELECT ON identidade.t TO bairrin_app ,postgres;',
+      'postgres',
+    ],
+    [
+      'comentário de bloco no meio da lista',
+      'GRANT SELECT ON identidade.t TO bairrin_app, /* nada */ postgres;',
+      'postgres',
+    ],
+    [
+      'comentário de linha no meio da lista',
+      'GRANT SELECT ON identidade.t TO bairrin_app, -- nada\n  postgres;',
+      'postgres',
+    ],
+    [
+      'dois GRANT na mesma linha, o segundo para postgres',
+      'GRANT SELECT ON identidade.t TO bairrin_app;GRANT SELECT ON identidade.t TO postgres;',
+      'postgres',
+    ],
+    ['papel em maiúsculas e sem aspas', 'GRANT SELECT ON identidade.t TO Postgres;', 'postgres'],
+    [
+      'papel entre aspas, sem espaço depois do TO',
+      'GRANT SELECT ON identidade.t TO"postgres";',
+      'postgres',
+    ],
+    [
+      'papel embutido do Postgres',
+      'GRANT SELECT ON identidade.t TO pg_read_all_data;',
+      'pg_read_all_data',
+    ],
+    [
+      'nome que só começa como o papel',
+      'GRANT SELECT ON identidade.t TO bairrin_appx;',
+      'bairrin_appx',
+    ],
+    [
+      'nome que só termina como o papel',
+      'GRANT SELECT ON identidade.t TO xbairrin_app;',
+      'xbairrin_app',
+    ],
+    [
+      'EXECUTE em todas as funções do schema',
+      'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA identidade TO postgres;',
+      'postgres',
+    ],
+    ['USAGE em tipo', 'GRANT USAGE ON TYPE identidade.papel TO postgres;', 'postgres'],
+    [
+      'USAGE em sequência para authenticated',
+      'GRANT USAGE ON SEQUENCE identidade.seq TO authenticated;',
+      'authenticated',
+    ],
+    [
+      'em todas as tabelas, junto com PUBLIC',
+      'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA identidade TO bairrin_app, public;',
+      'public',
+    ],
+    [
+      'GRANT dentro de função SQL (corpo entre aspas)',
+      "CREATE FUNCTION identidade.f() RETURNS void LANGUAGE sql AS 'GRANT SELECT ON identidade.t TO postgres';",
+      'postgres',
+    ],
+    [
+      'GRANT dentro de função SQL (BEGIN ATOMIC)',
+      'CREATE FUNCTION identidade.f() RETURNS void LANGUAGE sql BEGIN ATOMIC GRANT SELECT ON identidade.t TO postgres; END;',
+      'postgres',
+    ],
+    [
+      "GRANT dentro de EXECUTE com E'...'",
+      "DO $$ BEGIN EXECUTE E'GRANT SELECT ON identidade.t TO postgres'; END $$;",
+      'postgres',
+    ],
+  ];
+  for (const [nome, comando, papel] of recusados) {
+    it(`recusa ${nome}`, () => {
+      const resultado = mensagens(PASTA, REVERSAO + comando);
+      assert.equal(resultado.length, 1, resultado.join('\n'));
+      assert.match(resultado[0], new RegExp(`^GRANT para ${papel} \\((P8|S2)\\)`));
+    });
+  }
+
+  /** Destino que o verificador não consegue ler como nome: reprova, em vez de deixar passar. */
+  const nomesIlegiveis = [
+    [
+      'concatenação (||) no EXECUTE',
+      "DO $$ BEGIN EXECUTE 'GRANT SELECT ON identidade.t TO ' || 'postgres'; END $$;",
+    ],
+    [
+      'variável no EXECUTE',
+      "DO $$ DECLARE r text := 'postgres'; BEGIN EXECUTE 'GRANT SELECT ON identidade.t TO ' || r; END $$;",
+    ],
+    [
+      '%s no format',
+      "DO $$ BEGIN EXECUTE format('GRANT SELECT ON identidade.t TO %s', 'postgres'); END $$;",
+    ],
+    [
+      '%L no format',
+      "DO $$ BEGIN EXECUTE format('GRANT SELECT ON identidade.t TO %L', 'postgres'); END $$;",
+    ],
+    [
+      '%I no meio da lista',
+      "DO $$ BEGIN EXECUTE format('GRANT SELECT ON identidade.t TO bairrin_app, %I', 'postgres'); END $$;",
+    ],
+    [
+      "\\x70 no lugar do p em E'...'",
+      "DO $$ BEGIN EXECUTE E'GRANT SELECT ON identidade.t TO \\x70ostgres'; END $$;",
+    ],
+    ['parênteses no lugar do nome', 'GRANT SELECT ON identidade.t TO (postgres);'],
+  ];
+  for (const [nome, comando] of nomesIlegiveis) {
+    it(`reprova destino que não é um nome: ${nome}`, () => {
+      const resultado = mensagens(PASTA, REVERSAO + comando);
+      assert.ok(
+        resultado.some((m) =>
+          /^GRANT para (papel montado em tempo de execução|postgres) \(P8\)/.test(m),
+        ),
+        resultado.join('\n') || 'passou sem problema',
+      );
+    });
+  }
+
+  it('aceita o par que a migração da identidade vai usar: REVOKE FROM PUBLIC e depois GRANT em função e tipo', () => {
+    const sql = `${REVERSAO}CREATE TYPE identidade.papel AS ENUM ('a');
+REVOKE USAGE ON TYPE identidade.papel FROM PUBLIC;
+GRANT USAGE ON TYPE identidade.papel TO bairrin_app;
+CREATE FUNCTION identidade.f() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$ SELECT 1 $$;
+REVOKE ALL ON FUNCTION identidade.f() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION identidade.f() TO bairrin_app;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA identidade FROM PUBLIC;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA identidade TO bairrin_app, bairrin_migracao;
+REVOKE ALL ON SCHEMA identidade FROM PUBLIC;
+GRANT USAGE ON SCHEMA identidade TO bairrin_app;
+`;
+    assert.deepEqual(mensagens(PASTA, sql), []);
+  });
+
+  it('o REVOKE de qualquer papel passa, mas o GRANT que vem depois para o mesmo papel reprova', () => {
+    const sql = `${REVERSAO}REVOKE ALL ON ALL TABLES IN SCHEMA identidade FROM postgres, PUBLIC;
+GRANT SELECT ON identidade.t TO postgres;
+`;
+    const resultado = mensagens(PASTA, sql);
+    assert.equal(resultado.length, 1, resultado.join('\n'));
+    assert.match(resultado[0], /^GRANT para postgres \(P8\)/);
+  });
+
+  it('a mensagem diz qual papel foi recusado e a regra, sem repetir o resto do comando', () => {
+    const [problema] = analisarMigracao(
+      PASTA,
+      `${REVERSAO}GRANT SELECT ON identidade.contas TO bairrin_app, supabase_admin;`,
+    );
+    assert.equal(problema.linha, 2);
+    assert.match(
+      problema.mensagem,
+      /^GRANT para supabase_admin \(P8\): só bairrin_app e bairrin_migracao/,
+    );
+    assert.doesNotMatch(problema.mensagem, /identidade\.contas/);
+  });
+});
+
+describe('modelo da migração da identidade (QA do grupo A)', () => {
+  const MODELO = join(FIXTURES, 'identidade-modelo');
+  const PASTA = '20261020000000_identidade_qa';
+  const sql = readFileSync(join(MODELO, PASTA, 'migration.sql'), 'utf8');
+
+  it('passa no verificador, com REVOKE ... FROM PUBLIC antes dos GRANT de função e tipo', () => {
+    const { total, problemas } = verificarMigracoes(MODELO);
+    assert.equal(total, 1);
+    assert.deepEqual(problemas, []);
+    assert.match(sql, /REVOKE ALL ON FUNCTION[^;]*FROM PUBLIC;/);
+    assert.match(sql, /REVOKE USAGE ON TYPE[^;]*FROM PUBLIC;/);
+  });
+
+  it('sem os REVOKE o verificador também passa: o que sobra para PUBLIC só o catálogo vê', () => {
+    const semRevoke = sql.replaceAll(/^REVOKE .*$/gm, '');
+    assert.doesNotMatch(semRevoke, /^REVOKE/m);
+    assert.deepEqual(mensagens(PASTA, semRevoke), []);
+  });
+
+  it('um GRANT a mais para postgres no modelo reprova só por isso', () => {
+    const comGrantAMais = `${sql}GRANT SELECT ON "identidade_qa"."contas" TO postgres;\n`;
+    const resultado = mensagens(PASTA, comGrantAMais);
+    assert.equal(resultado.length, 1, resultado.join('\n'));
+    assert.match(resultado[0], /^GRANT para postgres \(P8\)/);
   });
 });

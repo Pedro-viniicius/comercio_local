@@ -55,6 +55,17 @@ describe('ehChaveSensivel', () => {
     'Message',
     'msg',
     'MSG',
+    // P8: `mensagem` e `errorMessage` também levam a mensagem de um erro.
+    'mensagem',
+    'Mensagem',
+    'errorMessage',
+    'error_message',
+    'ErrorMessage',
+    // S70: a pilha começa pela mensagem do erro.
+    'stack',
+    'Stack',
+    'pilha',
+    'Pilha',
   ])('%s é sensível', (chave) => {
     expect(ehChaveSensivel(chave)).toBe(true);
   });
@@ -67,9 +78,11 @@ describe('ehChaveSensivel', () => {
     'tipo',
     'lojaId',
     'responseTime',
-    'pilha',
+    'stackId',
+    'pilhaDeChamadas',
     'messageId',
     'mensagens',
+    'mensagemId',
   ])('%s não é sensível', (chave) => {
     expect(ehChaveSensivel(chave)).toBe(false);
   });
@@ -91,6 +104,86 @@ describe('redigir', () => {
       lojas: [{ cnpj: VALOR_REDIGIDO, nome: VALOR_REDIGIDO, categoria: 'padaria' }],
       senha: VALOR_REDIGIDO,
       quantidade: 3,
+    });
+  });
+
+  it('redige `mensagem`, `errorMessage` e `error_message` com e-mail, mas não `mensagemId` (P8)', () => {
+    const email = 'fulano@exemplo.com';
+    const entrada = {
+      mensagem: email,
+      errorMessage: email,
+      aninhado: { error_message: email },
+      mensagemId: 'm-1',
+    };
+
+    const redigido = redigir(entrada);
+
+    expect(redigido).toEqual({
+      mensagem: VALOR_REDIGIDO,
+      errorMessage: VALOR_REDIGIDO,
+      aninhado: { error_message: VALOR_REDIGIDO },
+      mensagemId: 'm-1',
+    });
+    expect(JSON.stringify(redigido)).not.toContain(email);
+  });
+
+  it('`mensagem` e `errorMessage` em qualquer nível, dentro de array e com a grafia trocada (QA, P8)', () => {
+    const email = 'fulano@exemplo.com';
+    const entrada = {
+      Mensagem: email,
+      ERROR_MESSAGE: email,
+      'error.message': email,
+      'Mensagem ': email,
+      erro: { message: email, Message: email, detalhes: { mensagem: email } },
+      lista: [[{ errorMessage: email }], { mensagem: email }],
+      mensagemId: 'm-1',
+      mensagem_id: 'm-2',
+      mensagens: ['m-3'],
+    };
+
+    const redigido = redigir(entrada);
+
+    expect(JSON.stringify(redigido)).not.toContain(email);
+    expect(redigido).toEqual({
+      Mensagem: VALOR_REDIGIDO,
+      ERROR_MESSAGE: VALOR_REDIGIDO,
+      'error.message': VALOR_REDIGIDO,
+      'Mensagem ': VALOR_REDIGIDO,
+      erro: {
+        message: VALOR_REDIGIDO,
+        Message: VALOR_REDIGIDO,
+        detalhes: { mensagem: VALOR_REDIGIDO },
+      },
+      lista: [[{ errorMessage: VALOR_REDIGIDO }], { mensagem: VALOR_REDIGIDO }],
+      mensagemId: 'm-1',
+      mensagem_id: 'm-2',
+      mensagens: ['m-3'],
+    });
+  });
+
+  it('`mensagem` com objeto no lugar do texto também é apagada inteira (QA, P8)', () => {
+    const redigido = redigir({ mensagem: { email: 'fulano@exemplo.com' }, errorMessage: ['x'] });
+    expect(redigido).toEqual({ mensagem: VALOR_REDIGIDO, errorMessage: VALOR_REDIGIDO });
+  });
+
+  it('redige `stack` e `pilha` em qualquer nível, mas o `Error` dentro do objeto mantém os quadros (S70)', () => {
+    const email = 'fulano@exemplo.com';
+    const erro = new Error(`falha para ${email}`);
+    const entrada = {
+      stack: erro.stack,
+      pilha: erro.stack,
+      aninhado: { Stack: erro.stack, lista: [{ PILHA: erro.stack }] },
+      causa: erro,
+    };
+
+    const redigido = redigir(entrada);
+
+    expect(JSON.stringify(redigido)).not.toContain(email);
+    expect(redigido).toEqual({
+      stack: VALOR_REDIGIDO,
+      pilha: VALOR_REDIGIDO,
+      aninhado: { Stack: VALOR_REDIGIDO, lista: [{ PILHA: VALOR_REDIGIDO }] },
+      causa: { tipo: 'Error', pilha: expect.stringMatching(/^\s+at\s/) as unknown },
     });
   });
 

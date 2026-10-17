@@ -15,7 +15,7 @@ Os contextos precisam reagir a fatos de outros contextos (pedido criado, pagamen
 - O pg-boss vive no schema `pgboss`. O schema é criado e migrado por um passo próprio, `node dist/cli/migrar-pg-boss.js`, com o papel de migração (no `release_command`, depois do `prisma migrate deploy`, e no `globalSetup` dos testes). A aplicação sobe com `migrate: false` e `bairrin_app` só com DML.
 - O payload da outbox leva ids e nunca dado pessoal, token ou senha. O erro de um assinante vai para o `output` do job do pg-boss, então o assinante lança erro sanitizado, sem `cause`.
 - Retenção: outbox publicada 30 dias e jobs encerrados 7 dias, por uma tarefa diária de limpeza (03h15, horário de Brasília).
-- Eventos são versionados e, quando existirem, ficam em `packages/contratos/src/eventos`.
+- Eventos são versionados (`tipo` no formato `<contexto>.<Fato>`, `versao`, payload só com ids) e ficam no contrato do contexto, como `packages/contratos/src/identidade/eventos.ts`.
 
 ## Consequências
 

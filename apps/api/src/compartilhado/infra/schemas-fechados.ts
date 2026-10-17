@@ -136,15 +136,26 @@ export const TRIGGERS_DA_AUDITORIA: readonly string[] = [
   'auditoria_sem_update_delete',
 ];
 
+/** Papel de migração (infra/postgres/init/01-papeis.sql): dono dos schemas e dos objetos. */
+export const PAPEL_DE_MIGRACAO = 'bairrin_migracao';
+
+/**
+ * Únicos papéis que recebem privilégio nos objetos do Bairrin, além do dono de
+ * cada objeto (P8 do 01b): a aplicação e o papel de migração.
+ */
+export const PAPEIS_COM_PRIVILEGIO: readonly string[] = [PAPEL_DA_APLICACAO, PAPEL_DE_MIGRACAO];
+
 /** Regras conferidas no catálogo (S33), na ordem da mensagem. */
 export type RegraDoCatalogo =
   | 'dono-e-a-aplicacao'
+  | 'dono-fora-dos-papeis'
   | 'create-da-aplicacao'
   | 'tabela-sem-rls'
   | 'politica-para-papel-proibido'
   | 'trigger-da-auditoria'
   | 'regra-de-reescrita'
   | 'grant-option-da-aplicacao'
+  | 'privilegio-para-outro-papel'
   | 'view-sem-security-invoker';
 
 export interface ProblemaNoCatalogo {
@@ -157,12 +168,21 @@ export interface OpcoesDoCatalogo {
   schemas?: readonly string[];
   /** Papéis proibidos nas políticas; sem lista, `PAPEIS_FORA_DAS_POLITICAS`. */
   papeisForaDasPoliticas?: readonly string[];
+  /**
+   * Papéis que podem receber privilégio (`privilegio-para-outro-papel`); sem
+   * lista, `PAPEIS_COM_PRIVILEGIO`. Papel que não existe é ignorado.
+   */
+  papeisPermitidos?: readonly string[];
 }
 
 /**
  * Uma linha por objeto fora das regras, nos schemas conferidos:
  * - `dono-e-a-aplicacao`: schema, relação, função ou tipo cujo dono é
  *   `bairrin_app` (ou papel de que ele é membro); o dono ignora RLS e GRANTs;
+ * - `dono-fora-dos-papeis` (R29 e S76 do 01b): relação, função ou tipo, num
+ *   schema cujo dono é `PAPEL_DE_MIGRACAO`, com outro dono que não seja a
+ *   aplicação (esse cai na regra anterior). Fecha o que o P8 deixa de fora,
+ *   porque ele só confere os objetos de `PAPEL_DE_MIGRACAO`;
  * - `create-da-aplicacao`: `bairrin_app` com CREATE no schema;
  * - `tabela-sem-rls`: tabela comum ou particionada sem RLS ligado (menos
  *   `TABELA_DE_CONTROLE_DO_PRISMA`);
@@ -175,6 +195,22 @@ export interface OpcoesDoCatalogo {
  * - `grant-option-da-aplicacao`: privilégio com `WITH GRANT OPTION` para
  *   `bairrin_app` (S34) em schema, relação, coluna, função, tipo, no banco ou
  *   em privilégio padrão;
+ * - `privilegio-para-outro-papel` (P8 do 01b): entrada da ACL de schema,
+ *   relação, coluna, função ou tipo cujo dono é `PAPEL_DE_MIGRACAO`, ou de
+ *   privilégio padrão definido por ele, para papel que não seja o dono nem um
+ *   de `PAPEIS_COM_PRIVILEGIO`; PUBLIC conta como outro papel. O objeto sai
+ *   como `<objeto> para <papel>`. Ficam de fora o banco (no Supabase outros
+ *   papéis têm CONNECT) e os objetos de outros donos (R29): o `public` do
+ *   Supabase, do `pg_database_owner`, dá USAGE a `postgres` e `service_role`, e
+ *   ali `acessosIndevidos` continua barrando `anon`, `authenticated` e PUBLIC;
+ *   dentro dos schemas do Bairrin, objeto de outro dono cai em
+ *   `dono-fora-dos-papeis`. Só a ACL explícita conta, menos na função
+ *   `SECURITY DEFINER` (S72): com ACL nula (o padrão do Postgres), função e
+ *   tipo dão EXECUTE e USAGE a PUBLIC sem entrada, e só na `SECURITY DEFINER`
+ *   a ACL nula vale como a padrão (`acldefault`), que aponta PUBLIC. Nas
+ *   outras, o primeiro GRANT grava essa entrada, e então a migração precisa do
+ *   `REVOKE ... FROM PUBLIC`. Aplicar o padrão a tudo reprovaria os tipos de
+ *   linha e as funções do pg-boss;
  * - `view-sem-security-invoker`: view sem `security_invoker=true` (lê as
  *   tabelas com os privilégios do dono, que ignora RLS).
  * Lista vazia: catálogo dentro das regras.
@@ -186,10 +222,41 @@ export async function problemasNoCatalogo(
   const schemas = opcoes.schemas ?? (await schemasDoBairrin(cliente));
   const { rows } = await cliente.query<ProblemaNoCatalogo>(
     `WITH app AS (SELECT oid FROM pg_roles WHERE rolname = $2),
+          mig AS (SELECT oid FROM pg_roles WHERE rolname = $7),
           ns AS (SELECT oid, nspname, nspowner, nspacl FROM pg_namespace
                   WHERE nspname = ANY($1::text[])),
-          rel AS (SELECT c.*, ns.nspname || '.' || c.relname AS nome
+          rel AS (SELECT c.*, ns.nspname || '.' || c.relname AS nome, ns.nspowner AS dono_do_schema
                     FROM pg_class c JOIN ns ON ns.oid = c.relnamespace),
+          -- ACLs explícitas (NULL = padrão do Postgres, sem entrada) com o dono de cada
+          -- objeto. Na função SECURITY DEFINER, a ACL nula vira a padrão, com EXECUTE
+          -- para PUBLIC (S72).
+          acls AS (
+            SELECT 'schema ' || ns.nspname AS objeto, ns.nspowner AS dono, ns.nspacl AS acl,
+                   'objeto' AS fonte
+              FROM ns
+            UNION ALL
+            SELECT 'relação ' || rel.nome, rel.relowner, rel.relacl, 'objeto' FROM rel
+            UNION ALL
+            SELECT 'coluna ' || rel.nome || '.' || a.attname, rel.relowner, a.attacl, 'objeto'
+              FROM pg_attribute a JOIN rel ON rel.oid = a.attrelid
+             WHERE a.attacl IS NOT NULL
+            UNION ALL
+            SELECT 'função ' || p.oid::regprocedure::text, p.proowner,
+                   CASE WHEN p.prosecdef THEN coalesce(p.proacl, acldefault('f', p.proowner))
+                        ELSE p.proacl END,
+                   'objeto'
+              FROM pg_proc p JOIN ns ON ns.oid = p.pronamespace
+            UNION ALL
+            SELECT 'tipo ' || ns.nspname || '.' || t.typname, t.typowner, t.typacl, 'objeto'
+              FROM pg_type t JOIN ns ON ns.oid = t.typnamespace
+            UNION ALL
+            SELECT 'banco ' || d.datname, d.datdba, d.datacl, 'banco' FROM pg_database d
+             WHERE d.datname = current_database()
+            UNION ALL
+            SELECT 'privilégio padrão de ' || pg_get_userbyid(d.defaclrole), d.defaclrole,
+                   d.defaclacl, 'padrao'
+              FROM pg_default_acl d
+             WHERE d.defaclnamespace = 0 OR d.defaclnamespace IN (SELECT oid FROM ns)),
           problemas AS (
             SELECT 'dono-e-a-aplicacao' AS regra, 'schema ' || ns.nspname AS objeto
               FROM ns, app WHERE pg_has_role(app.oid, ns.nspowner, 'MEMBER')
@@ -206,6 +273,24 @@ export async function problemasNoCatalogo(
               FROM pg_type t JOIN ns ON ns.oid = t.typnamespace, app
              WHERE t.typrelid = 0 AND t.typcategory <> 'A'
                AND pg_has_role(app.oid, t.typowner, 'MEMBER')
+            UNION ALL
+            -- Num schema de bairrin_migracao, outro dono só se o objeto não for da
+            -- aplicação (esse já sai em dono-e-a-aplicacao). Sem a aplicação no
+            -- banco, todo dono de fora é apontado.
+            SELECT 'dono-fora-dos-papeis', 'relação ' || rel.nome
+              FROM rel JOIN mig ON mig.oid = rel.dono_do_schema
+             WHERE rel.relowner <> mig.oid
+               AND NOT EXISTS (SELECT FROM app WHERE pg_has_role(app.oid, rel.relowner, 'MEMBER'))
+            UNION ALL
+            SELECT 'dono-fora-dos-papeis', 'função ' || p.oid::regprocedure::text
+              FROM pg_proc p JOIN ns ON ns.oid = p.pronamespace JOIN mig ON mig.oid = ns.nspowner
+             WHERE p.proowner <> mig.oid
+               AND NOT EXISTS (SELECT FROM app WHERE pg_has_role(app.oid, p.proowner, 'MEMBER'))
+            UNION ALL
+            SELECT 'dono-fora-dos-papeis', 'tipo ' || ns.nspname || '.' || t.typname
+              FROM pg_type t JOIN ns ON ns.oid = t.typnamespace JOIN mig ON mig.oid = ns.nspowner
+             WHERE t.typrelid = 0 AND t.typcategory <> 'A' AND t.typowner <> mig.oid
+               AND NOT EXISTS (SELECT FROM app WHERE pg_has_role(app.oid, t.typowner, 'MEMBER'))
             UNION ALL
             SELECT 'create-da-aplicacao', 'schema ' || ns.nspname
               FROM ns, app WHERE has_schema_privilege(app.oid, ns.oid, 'CREATE')
@@ -235,31 +320,24 @@ export async function problemasNoCatalogo(
               FROM pg_rewrite r JOIN rel ON rel.oid = r.ev_class
              WHERE NOT (rel.relkind IN ('v', 'm') AND r.rulename = '_RETURN')
             UNION ALL
-            SELECT DISTINCT 'grant-option-da-aplicacao', o.objeto
-              FROM (SELECT 'schema ' || ns.nspname AS objeto, ns.nspacl AS acl FROM ns
-                    UNION ALL
-                    SELECT 'relação ' || rel.nome, rel.relacl FROM rel
-                    UNION ALL
-                    SELECT 'coluna ' || rel.nome || '.' || a.attname, a.attacl
-                      FROM pg_attribute a JOIN rel ON rel.oid = a.attrelid
-                     WHERE a.attacl IS NOT NULL
-                    UNION ALL
-                    SELECT 'função ' || p.oid::regprocedure::text, p.proacl
-                      FROM pg_proc p JOIN ns ON ns.oid = p.pronamespace
-                    UNION ALL
-                    SELECT 'tipo ' || ns.nspname || '.' || t.typname, t.typacl
-                      FROM pg_type t JOIN ns ON ns.oid = t.typnamespace
-                    UNION ALL
-                    SELECT 'banco ' || d.datname, d.datacl FROM pg_database d
-                     WHERE d.datname = current_database()
-                    UNION ALL
-                    SELECT 'privilégio padrão de ' || pg_get_userbyid(d.defaclrole), d.defaclacl
-                      FROM pg_default_acl d
-                     WHERE d.defaclnamespace = 0 OR d.defaclnamespace IN (SELECT oid FROM ns)) o,
-                   aclexplode(o.acl) x, app
+            SELECT DISTINCT 'grant-option-da-aplicacao', a.objeto
+              FROM acls a, aclexplode(a.acl) x, app
              WHERE x.is_grantable
                AND CASE WHEN x.grantee = 0 THEN false
                         ELSE pg_has_role(app.oid, x.grantee, 'MEMBER') END
+            UNION ALL
+            -- Só objeto e privilégio padrão de bairrin_migracao (R29): o banco fica de
+            -- fora (no Supabase outros papéis têm CONNECT), e o public do Supabase, de
+            -- outro dono, dá USAGE a papéis da plataforma. PUBLIC (grantee 0) conta
+            -- como outro papel.
+            SELECT DISTINCT 'privilegio-para-outro-papel',
+                   a.objeto || ' para '
+                     || CASE WHEN x.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END
+              FROM acls a JOIN mig ON mig.oid = a.dono, aclexplode(a.acl) x
+             WHERE a.fonte <> 'banco'
+               AND x.grantee <> a.dono
+               AND (x.grantee = 0
+                    OR x.grantee NOT IN (SELECT oid FROM pg_roles WHERE rolname = ANY($6::text[])))
             UNION ALL
             SELECT 'view-sem-security-invoker', rel.nome FROM rel
              WHERE rel.relkind = 'v'
@@ -273,6 +351,8 @@ export async function problemasNoCatalogo(
       opcoes.papeisForaDasPoliticas ?? PAPEIS_FORA_DAS_POLITICAS,
       TABELA_DE_CONTROLE_DO_PRISMA,
       TRIGGERS_DA_AUDITORIA,
+      opcoes.papeisPermitidos ?? PAPEIS_COM_PRIVILEGIO,
+      PAPEL_DE_MIGRACAO,
     ],
   );
   return rows;
