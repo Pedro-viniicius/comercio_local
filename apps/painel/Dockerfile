@@ -3,7 +3,7 @@
 # Contexto = raiz do monorepo: docker build -f apps/painel/Dockerfile -t bairrin-painel .
 
 # ---- 1. Build do painel ----
-FROM node:22.23.3-trixie-slim@sha256:154ba2f4d6fec323d28e4f4bb86bba4677f1223391a1979cf521304e03a98dfa AS construcao
+FROM node:26.12.0-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS construcao
 
 # pnpm na versão do campo `packageManager` do package.json da raiz, via corepack.
 ENV CI=true \
