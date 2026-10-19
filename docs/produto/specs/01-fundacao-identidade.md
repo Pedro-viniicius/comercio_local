@@ -188,6 +188,11 @@ Indicador de passos; nenhuma outra tela do painel acessível até concluir; "Sai
 ### P1c. Recuperar senha (painel)
 Mesmo fluxo e textos de A4, no Cartão de autenticação. Depois de redefinir, P1 com o Banner de sucesso; o 2FA continua exigido.
 
+**Divergências implementadas (etapa 15, rodada 1):**
+- Código inválido na P1c: o painel diz "Código inválido ou expirado. Peça um novo." (`erroPorTela.recuperacaoDeSenha`). Diverge da A4 porque o botão se chama "Reenviar código"; trocar para "Reenviar código" fica como ajuste de microcopy para a próxima passada.
+- "Sair" no passo 3 da P1b sem a caixa marcada: **Banner de confirmação em linha** ("Sair sem guardar os códigos?", com "Voltar aos códigos" e "Sair mesmo assim") no lugar do Modal de confirmação. Motivo: o painel ainda não tem Modal nem armadilha de foco; o Banner leva o foco ao botão seguro. Revisitar quando o Modal existir.
+- "Voltar" virou "Voltar para entrar" (P1a e P1c); aviso de 5 minutos da P1b repetido no passo 2; aviso de fim de sessão ("Sua sessão vai expirar em 2 minutos por falta de uso.") fixo no topo da janela (sticky); o foco vai ao título "Início" ao entrar na área protegida.
+
 ## Estados (resumo transversal)
 
 | Situação | Comportamento | Origem |
@@ -246,6 +251,8 @@ Além dos já citados nas telas:
 - `apps/painel/src/autenticacao/*.tsx` (etapa 15).
 - `apps/consumidor/src/app/(conta)/*.tsx`, `apps/lojista/src/app/(conta)/*.tsx` (etapas 17 e 18).
 - Assets de marca: `assets/brand/bairrin-logo-horizontal.svg` (seção 2.7 da identidade).
+- Pendência (dev ou lead): o logo hoje vem de `apps/painel/src/autenticacao/bairrin-logo-horizontal.svg`; falta gravar o asset final em `assets/brand/bairrin-logo-horizontal.svg` e fazer o painel importar dele (ou do pacote de tokens).
+- Pendência (plano 08, listagens longas): quando houver páginas com barra fixa ou tabelas, rever a posição do aviso de fim de sessão (hoje `position: sticky` em `.aut-aviso-fixo`, dentro do `main`).
 - Não tocar: `packages/mobile-base/src/sessao/**`, `packages/contratos/**`, `packages/cliente-api/**`, `apps/api/**`.
 
 ## Perguntas em aberto

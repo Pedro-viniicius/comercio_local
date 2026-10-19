@@ -5,7 +5,14 @@
 // encerrada no aparelho. O logout que a API não confirmou fica registrado como
 // revogação pendente e é tentado de novo (S80). Não registra nada em log, e
 // nenhum erro carrega token.
-import { CABECALHO_DO_CLIENTE, sessaoSchema, z, type Sessao } from '@bairrin/contratos';
+import {
+  CABECALHO_DO_CLIENTE,
+  clienteDoAppSchema,
+  sessaoSchema,
+  z,
+  type ClienteDoApp,
+  type Sessao,
+} from '@bairrin/contratos';
 import type { ClienteApi, OpcoesDeRequisicao } from './cliente.ts';
 import { ErroDeApi } from './erros.ts';
 
@@ -65,9 +72,10 @@ export interface ArmazenamentoDeRevogacao {
 }
 
 /**
- * Como a renovação viaja. `token` (apps): `tokenRenovacao` no corpo, guardado
- * com a sessão. `cookie` (painel): corpo vazio, cabeçalho `X-Cliente: painel` e
- * o cookie `HttpOnly`; o `tokenRenovacao` nunca é guardado.
+ * Como a renovação viaja. `token` (apps): `tokenRenovacao` e o `cliente` do app
+ * no corpo, com o token guardado com a sessão. `cookie` (painel): corpo vazio,
+ * cabeçalho `X-Cliente: painel` e o cookie `HttpOnly`; o `tokenRenovacao` nunca
+ * é guardado.
  */
 export type ModoDeRenovacao = 'token' | 'cookie';
 
@@ -104,13 +112,12 @@ export interface ResultadoDoLogout {
   revogadaNoServidor: boolean;
 }
 
-export interface OpcoesDoClienteAutenticado {
+interface OpcoesComunsDoClienteAutenticado {
   /** Cliente base (`criarClienteApi`). Rotas públicas (entrar, cadastro) vão direto por ele. */
   cliente: ClienteApi;
   armazenamento: ArmazenamentoDeSessao;
   /** Onde fica o logout que a API ainda não confirmou (S80). */
   revogacaoPendente: ArmazenamentoDeRevogacao;
-  modoDeRenovacao: ModoDeRenovacao;
   /**
    * Chamado uma vez por sessão encerrada, depois de limpar o armazenamento. É
    * aqui que o app limpa cache, fila offline e `queryClient` (S11). Se lançar,
@@ -124,6 +131,30 @@ export interface OpcoesDoClienteAutenticado {
   aoFalharEmSegundoPlano?: (falha: FalhaEmSegundoPlano) => void;
 }
 
+/**
+ * Nos apps (`token`), `clienteDoApp` é obrigatório: vai como `cliente` no corpo
+ * de toda renovação, inclusive a da revogação pendente, porque a API compara o
+ * `cliente` da requisição para devolver o par da tolerância de 60 s (S16) e
+ * recusa com 400 o corpo sem ele. No painel (`cookie`), não é usado: a
+ * renovação vai com `X-Cliente: painel`.
+ */
+export type OpcoesDoClienteAutenticado = OpcoesComunsDoClienteAutenticado &
+  (
+    | { modoDeRenovacao: 'token'; clienteDoApp: ClienteDoApp }
+    | { modoDeRenovacao: 'cookie'; clienteDoApp?: ClienteDoApp }
+  );
+
+/** Opções de `ClienteAutenticado.requisitar`: as do cliente base e `renovarEm401`. */
+export interface OpcoesDeRequisicaoAutenticada<T> extends OpcoesDeRequisicao<T> {
+  /**
+   * Padrão `true`. Com `false`, um 401 volta direto ao chamador, sem renovar,
+   * sem repetir e sem encerrar a sessão. Todo polling passa `false` (S9): no
+   * painel, só a interação do usuário pode estender a inatividade de 30 min,
+   * e a renovação conta como atividade no servidor. Não vai para o cliente base.
+   */
+  renovarEm401?: boolean;
+}
+
 export interface ClienteAutenticado {
   /**
    * Como `ClienteApi.requisitar`, com o Bearer da sessão (sem sessão, vai sem
@@ -133,9 +164,10 @@ export interface ClienteAutenticado {
    * original; se a renovação falhar por rede, tempo ou erro do servidor, a
    * sessão continua e a requisição devolve esse erro. Falha do armazenamento
    * ou do aviso não muda o resultado. Nos apps, cada chamada também retoma a
-   * revogação pendente, sem esperar por ela.
+   * revogação pendente, sem esperar por ela. Com `renovarEm401: false`, o 401
+   * volta direto (S9).
    */
-  requisitar<T>(opcoes: OpcoesDeRequisicao<T>): Promise<T>;
+  requisitar<T>(opcoes: OpcoesDeRequisicaoAutenticada<T>): Promise<T>;
   /** A sessão atual (lê o armazenamento na primeira vez). */
   obterSessao(): Promise<Sessao | null>;
   /**
@@ -195,6 +227,21 @@ function temToken(credencial: CredencialPendente): boolean {
   return credencial.tokenAcesso !== undefined || credencial.tokenRenovacao !== undefined;
 }
 
+/**
+ * O `cliente` do corpo da renovação nos apps. Confere também em tempo de
+ * execução: sem ele, toda renovação levaria 400 e encerraria a sessão.
+ */
+function clienteDaRenovacao(opcoes: OpcoesDoClienteAutenticado): ClienteDoApp | undefined {
+  if (opcoes.modoDeRenovacao !== 'token') return undefined;
+  const lido = clienteDoAppSchema.safeParse(opcoes.clienteDoApp);
+  if (!lido.success) {
+    throw new TypeError(
+      'clienteDoApp é obrigatório no modo token: use app_consumidor ou app_lojista.',
+    );
+  }
+  return lido.data;
+}
+
 export function criarClienteAutenticado(opcoes: OpcoesDoClienteAutenticado): ClienteAutenticado {
   const {
     cliente,
@@ -204,6 +251,7 @@ export function criarClienteAutenticado(opcoes: OpcoesDoClienteAutenticado): Cli
     aoEncerrarSessao,
     aoFalharEmSegundoPlano,
   } = opcoes;
+  const clienteDoApp = clienteDaRenovacao(opcoes);
 
   // Estado em memória. Toda decisão da fila é síncrona sobre ele, para que
   // nenhuma leitura assíncrona do armazenamento abra espaço para uma segunda
@@ -319,13 +367,19 @@ export function criarClienteAutenticado(opcoes: OpcoesDoClienteAutenticado): Cli
     if (falha !== undefined) avisarFalha('limpar_sessao', falha.erro);
   }
 
+  /**
+   * Única saída da renovação, da sessão atual e da revogação pendente. Nos
+   * apps, o corpo leva sempre o `cliente`: sem ele, a API responderia 400, que
+   * conta como recusa e encerraria a sessão (ou daria por revogada uma
+   * pendência ainda viva no servidor).
+   */
   function pedirRenovacao(tokenRenovacao: string | undefined): Promise<Sessao> {
     return cliente.requisitar({
       metodo: 'POST',
       caminho: CAMINHO_DA_RENOVACAO,
       esquema: sessaoSchema,
       ...(modoDeRenovacao === 'token'
-        ? { corpo: { tokenRenovacao } }
+        ? { corpo: { tokenRenovacao, cliente: clienteDoApp } }
         : { cabecalhos: { [CABECALHO_DO_CLIENTE]: 'painel' } }),
     });
   }
@@ -597,7 +651,9 @@ export function criarClienteAutenticado(opcoes: OpcoesDoClienteAutenticado): Cli
 
   // ---- Operações públicas ----
 
-  async function requisitar<T>(pedido: OpcoesDeRequisicao<T>): Promise<T> {
+  async function requisitar<T>(opcoesDaRequisicao: OpcoesDeRequisicaoAutenticada<T>): Promise<T> {
+    // `renovarEm401` fica aqui: o cliente base não o conhece.
+    const { renovarEm401, ...pedido } = opcoesDaRequisicao;
     if (modoDeRenovacao === 'token') retomarRevogacoesPendentes();
     const atual = await obterSessao();
     if (atual === null) return cliente.requisitar(pedido);
@@ -606,7 +662,8 @@ export function criarClienteAutenticado(opcoes: OpcoesDoClienteAutenticado): Cli
     try {
       return await cliente.requisitar(comToken(pedido, atual.tokenAcesso));
     } catch (erro) {
-      if (!ehNaoAutenticado(erro)) throw erro;
+      // Só um `false` explícito desliga a renovação (S9).
+      if (!ehNaoAutenticado(erro) || renovarEm401 === false) throw erro;
       const renovada = await sessaoParaRepetir(atual.tokenAcesso, geracaoDoEnvio);
       if (renovada === null) throw erro;
       // 401 vem da guarda, antes de qualquer efeito: repetir é seguro mesmo

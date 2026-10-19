@@ -9,7 +9,14 @@
 // Leituras com trava (R1): os métodos `...ParaAtualizar` e `gravarRotacao`
 // travam a linha na unidade (`UnidadeDeTrabalhoFalsa.travar`) e rejeitam fora
 // dela, como pede a porta. A segunda unidade espera a primeira terminar e lê o
-// que ela gravou.
+// que ela gravou. As revogações de sessão (`atualizar`, `revogarDaFamilia`,
+// `revogarDaConta`) também travam as linhas, como o UPDATE no Postgres (R11):
+// sem isso, o rollback de uma rotação aberta apagaria a revogação gravada no
+// meio. Fora de uma unidade, cada uma roda na própria unidade, como um comando
+// avulso (autocommit) no banco. Na conta, travam a linha a leitura
+// `buscarPorIdParaAtualizar` e as gravações de uma coluna novas
+// (`gravarSenhaRedefinida`, `gravarSenhaRemovida`, `gravarDesativacao`, S95);
+// `atualizar`, `gravarUltimoLogin` e `gravarEmailVerificado` não travam no fake.
 //
 // `criarIdentidadeEmMemoria()` monta tudo ligado: repositórios, auditoria,
 // unidade de trabalho e publicador.
@@ -42,6 +49,7 @@ import type { Email } from '../../../src/modulos/identidade/dominio/email.ts';
 import {
   type CodigoDeRecuperacao,
   type Consentimento,
+  type ConsentimentoComDocumento,
   type DocumentoLegal,
   type ExportacaoDoTitular,
   RepositorioDeBloqueios,
@@ -129,6 +137,7 @@ function erroDoFalso(motivo: string): Error {
 // ---------------------------------------------------------------------------
 
 export class ContasEmMemoria extends RepositorioDeContas {
+  readonly #unidade: UnidadeDeTrabalhoFalsa;
   readonly #tabela: Tabela<DadosDaConta>;
   readonly #aoApagar: (contaId: string) => void;
 
@@ -138,6 +147,7 @@ export class ContasEmMemoria extends RepositorioDeContas {
     aoApagar: (contaId: string) => void = () => undefined,
   ) {
     super();
+    this.#unidade = unidade;
     this.#tabela = new Tabela(unidade);
     this.#aoApagar = aoApagar;
   }
@@ -156,6 +166,16 @@ export class ContasEmMemoria extends RepositorioDeContas {
       const dados = this.#tabela.ler(id);
       return dados === undefined ? null : Conta.reconstituir(dados);
     });
+  }
+
+  /**
+   * Trava a conta na unidade (o `SELECT ... FOR NO KEY UPDATE`) e lê o que
+   * estiver guardado depois da espera. Rejeita fora da unidade de trabalho.
+   */
+  override async buscarPorIdParaAtualizar(id: string): Promise<Conta | null> {
+    await this.#unidade.travar(chaveDeTravaDaConta(id));
+    const dados = this.#tabela.ler(id);
+    return dados === undefined ? null : Conta.reconstituir(dados);
   }
 
   override buscarPorEmail(email: Email): Promise<Conta | null> {
@@ -183,6 +203,52 @@ export class ContasEmMemoria extends RepositorioDeContas {
     });
   }
 
+  /** Só `ultimo_login_em`, e só se a conta existe e está ativa (`WHERE id AND status = 'ativa'`). */
+  override gravarUltimoLogin(id: string, quando: Date): Promise<boolean> {
+    return comoPromessa(() => {
+      const dados = this.#tabela.ler(id);
+      if (dados === undefined || dados.status !== 'ativa') return false;
+      this.#tabela.gravar(id, { ...dados, ultimoLoginEm: new Date(quando.getTime()) });
+      return true;
+    });
+  }
+
+  /** Só `email_verificado_em`, com a primeira data guardada, e só em conta ativa. */
+  override gravarEmailVerificado(id: string, quando: Date): Promise<boolean> {
+    return comoPromessa(() => {
+      const dados = this.#tabela.ler(id);
+      if (dados === undefined || dados.status !== 'ativa') return false;
+      this.#tabela.gravar(id, {
+        ...dados,
+        emailVerificadoEm: dados.emailVerificadoEm ?? new Date(quando.getTime()),
+      });
+      return true;
+    });
+  }
+
+  /** Só `senha_hash` e `email_verificado_em` (primeira data), e só em conta ativa (S95). */
+  override gravarSenhaRedefinida(id: string, senhaHash: string, quando: Date): Promise<boolean> {
+    return this.#gravarSeAtiva(id, (dados) => ({
+      ...dados,
+      senhaHash,
+      emailVerificadoEm: dados.emailVerificadoEm ?? new Date(quando.getTime()),
+    }));
+  }
+
+  /** Só `senha_hash = NULL`, e só em conta ativa (S97). */
+  override gravarSenhaRemovida(id: string): Promise<boolean> {
+    return this.#gravarSeAtiva(id, (dados) => ({ ...dados, senhaHash: null }));
+  }
+
+  /** Só `status` e `desativada_em`, e só em conta ativa (S95). */
+  override gravarDesativacao(id: string, quando: Date): Promise<boolean> {
+    return this.#gravarSeAtiva(id, (dados) => ({
+      ...dados,
+      status: 'desativada',
+      desativadaEm: new Date(quando.getTime()),
+    }));
+  }
+
   override listarParaExpurgo(limite: Date, quantidade: number): Promise<string[]> {
     return comoPromessa(() =>
       this.#tabela
@@ -208,6 +274,19 @@ export class ContasEmMemoria extends RepositorioDeContas {
       this.#tabela.apagar(id);
       this.#aoApagar(id);
     });
+  }
+
+  /**
+   * Como o `UPDATE ... WHERE id = $1 AND status = 'ativa'`: dentro de uma
+   * unidade, trava a linha antes (o UPDATE trava até o fim da transação) e
+   * confere o status com o valor guardado depois da espera.
+   */
+  async #gravarSeAtiva(id: string, mudar: (dados: DadosDaConta) => DadosDaConta): Promise<boolean> {
+    if (this.#unidade.emTransacao) await this.#unidade.travar(chaveDeTravaDaConta(id));
+    const dados = this.#tabela.ler(id);
+    if (dados === undefined || dados.status !== 'ativa') return false;
+    this.#tabela.gravar(id, mudar(dados));
+    return true;
   }
 
   #exigirEmailLivre(dados: DadosDaConta): void {
@@ -293,16 +372,17 @@ export class SessoesEmMemoria extends RepositorioDeSessoes {
    * Só a revogação, com `coalesce` (R7): a primeira revogação guardada fica, e
    * nada além das colunas da revogação muda, mesmo que a entidade tenha sido
    * lida antes de uma rotação. Recusa sessão não revogada (rotação é por
-   * `gravarRotacao`).
+   * `gravarRotacao`). Trava a linha antes de gravar (R11).
    */
-  override atualizar(sessao: Sessao): Promise<void> {
-    return comoPromessa(() => {
-      const { id, revogadaEm, motivoRevogacao } = sessao.dados;
+  override async atualizar(sessao: Sessao): Promise<void> {
+    const { id, revogadaEm, motivoRevogacao } = sessao.dados;
+    if (revogadaEm === null || motivoRevogacao === null) {
+      throw erroDoFalso('atualizar só grava a revogação; a rotação vai por gravarRotacao');
+    }
+    await this.#unidade.executar(async () => {
+      await this.#unidade.travar(chaveDeTravaDaSessao(id));
       const guardada = this.#tabela.ler(id);
       if (guardada === undefined) throw erroDoFalso('sessão inexistente');
-      if (revogadaEm === null || motivoRevogacao === null) {
-        throw erroDoFalso('atualizar só grava a revogação; a rotação vai por gravarRotacao');
-      }
       this.#tabela.gravar(id, {
         ...guardada,
         revogadaEm: guardada.revogadaEm ?? revogadaEm,
@@ -323,7 +403,7 @@ export class SessoesEmMemoria extends RepositorioDeSessoes {
     const dados = sessao.dados;
     const trocado = sessao.ultimoTokenTrocado;
     if (trocado === null) throw erroDoFalso('gravarRotacao de sessão que não rotacionou');
-    await this.#unidade.travar(`sessoes:${dados.id}`);
+    await this.#unidade.travar(chaveDeTravaDaSessao(dados.id));
     const guardada = this.#tabela.ler(dados.id);
     if (
       guardada === undefined ||
@@ -353,7 +433,7 @@ export class SessoesEmMemoria extends RepositorioDeSessoes {
     motivo: MotivoDeRevogacao,
     agora: Date,
   ): Promise<number> {
-    return comoPromessa(() => this.#revogarOnde((s) => s.familiaId === familiaId, motivo, agora));
+    return this.#revogarOnde((s) => s.familiaId === familiaId, motivo, agora);
   }
 
   override revogarDaConta(
@@ -361,7 +441,7 @@ export class SessoesEmMemoria extends RepositorioDeSessoes {
     motivo: MotivoDeRevogacao,
     agora: Date,
   ): Promise<number> {
-    return comoPromessa(() => this.#revogarOnde((s) => s.contaId === contaId, motivo, agora));
+    return this.#revogarOnde((s) => s.contaId === contaId, motivo, agora);
   }
 
   override apagarDaConta(contaId: string): Promise<void> {
@@ -381,20 +461,36 @@ export class SessoesEmMemoria extends RepositorioDeSessoes {
     this.#usados.apagarOnde((usado) => ids.has(usado.sessaoId));
   }
 
+  /**
+   * Como o `UPDATE ... WHERE <condição> AND revogada_em IS NULL`: trava cada
+   * linha que casa (em ordem de id, para duas revogações não se cruzarem),
+   * espera quem a segura e confere de novo a condição com o valor guardado,
+   * como o Postgres reavalia o WHERE depois da espera (R11).
+   */
   #revogarOnde(
     condicao: (sessao: DadosDaSessao) => boolean,
     motivo: MotivoDeRevogacao,
     agora: Date,
-  ): number {
-    let revogadas = 0;
-    for (const dados of this.#tabela.valores()) {
-      if (!condicao(dados) || dados.revogadaEm !== null) continue;
-      const sessao = Sessao.reconstituir(dados);
-      sessao.revogar(motivo, agora);
-      this.#tabela.gravar(dados.id, sessao.dados);
-      revogadas += 1;
-    }
-    return revogadas;
+  ): Promise<number> {
+    const casa = (dados: DadosDaSessao) => condicao(dados) && dados.revogadaEm === null;
+    return this.#unidade.executar(async () => {
+      const ids = this.#tabela
+        .valores()
+        .filter(casa)
+        .map((dados) => dados.id)
+        .sort();
+      let revogadas = 0;
+      for (const id of ids) {
+        await this.#unidade.travar(chaveDeTravaDaSessao(id));
+        const dados = this.#tabela.ler(id);
+        if (dados === undefined || !casa(dados)) continue;
+        const sessao = Sessao.reconstituir(dados);
+        sessao.revogar(motivo, agora);
+        this.#tabela.gravar(id, sessao.dados);
+        revogadas += 1;
+      }
+      return revogadas;
+    });
   }
 
   #exigirTokenUnico(dados: DadosDaSessao): void {
@@ -456,6 +552,14 @@ export class DesafiosEmMemoria extends RepositorioDeDesafios {
   removerDaConta(contaId: string): void {
     this.#tabela.apagarOnde((desafio) => desafio.contaId === contaId);
   }
+}
+
+function chaveDeTravaDaConta(id: string): string {
+  return `contas:${id}`;
+}
+
+function chaveDeTravaDaSessao(id: string): string {
+  return `sessoes:${id}`;
 }
 
 /** Códigos e desafios moram em `codigos_verificacao`: a trava é pela linha dessa tabela. */
@@ -573,7 +677,12 @@ export class BloqueiosEmMemoria extends RepositorioDeBloqueios {
     });
   }
 
-  /** Trava a chave e, sem linha, grava o freio zerado (o `INSERT ... ON CONFLICT DO NOTHING`). */
+  /**
+   * Trava a chave e, sem linha, grava o freio zerado, como o `INSERT ... ON
+   * CONFLICT DO UPDATE ... RETURNING` do adaptador: sempre devolve um freio,
+   * inclusive quando a unidade que segurava a trava apagou a linha zerada
+   * (`salvar`) enquanto esta esperava (A-R1, S96).
+   */
   override async buscarParaAtualizar(
     chaveHmac: string,
     tipo: TipoDeBloqueio,
@@ -652,6 +761,21 @@ export class DocumentosLegaisEmMemoria extends RepositorioDeDocumentosLegais {
         .map((c) => c.aceitoEm.getTime());
       return aceites.length === 0 ? null : new Date(Math.max(...aceites));
     });
+  }
+
+  /** Os aceites da conta com tipo e versão do documento, do mais antigo para o mais novo. */
+  override listarConsentimentos(contaId: string): Promise<readonly ConsentimentoComDocumento[]> {
+    return comoPromessa(() =>
+      this.#consentimentos
+        .valores()
+        .filter((c) => c.contaId === contaId)
+        .sort((a, b) => a.aceitoEm.getTime() - b.aceitoEm.getTime() || a.id.localeCompare(b.id))
+        .map((c) => {
+          const documento = this.#documentos.ler(c.documentoId);
+          if (documento === undefined) throw erroDoFalso('consentimento de documento inexistente');
+          return { ...c, tipo: documento.tipo, versao: documento.versao };
+        }),
+    );
   }
 
   /** Cascata síncrona, usada por `ContasEmMemoria.apagar`. */
@@ -778,6 +902,20 @@ export class SolicitacoesEmMemoria extends RepositorioDeSolicitacoes {
     });
   }
 
+  override contarDesde(contaId: string, tipo: TipoDeSolicitacao, desde: Date): Promise<number> {
+    return comoPromessa(
+      () =>
+        this.#tabela
+          .valores()
+          .filter(
+            (s) =>
+              s.contaId === contaId &&
+              s.tipo === tipo &&
+              s.solicitadaEm.getTime() > desde.getTime(),
+          ).length,
+    );
+  }
+
   override listarPorStatus(
     tipo: TipoDeSolicitacao,
     status: StatusDaSolicitacao,
@@ -830,11 +968,13 @@ export class ExportacoesEmMemoria extends RepositorioDeExportacoes {
     });
   }
 
-  override marcarBaixada(id: string, agora: Date): Promise<void> {
+  /** Como `UPDATE ... WHERE id AND baixada_em IS NULL`: só o primeiro download marca (S10). */
+  override marcarBaixada(id: string, agora: Date): Promise<boolean> {
     return comoPromessa(() => {
       const exportacao = this.#tabela.ler(id);
-      if (exportacao === undefined) throw erroDoFalso('exportação inexistente');
-      this.#tabela.gravar(id, { ...exportacao, baixadaEm: exportacao.baixadaEm ?? agora });
+      if (exportacao === undefined || exportacao.baixadaEm !== null) return false;
+      this.#tabela.gravar(id, { ...exportacao, baixadaEm: agora });
+      return true;
     });
   }
 
@@ -843,6 +983,12 @@ export class ExportacoesEmMemoria extends RepositorioDeExportacoes {
       this.#tabela.apagarOnde(
         (e) => e.baixadaEm !== null || agora.getTime() >= e.expiraEm.getTime(),
       ),
+    );
+  }
+
+  override apagarNaoBaixadas(contaId: string): Promise<number> {
+    return comoPromessa(() =>
+      this.#tabela.apagarOnde((e) => e.contaId === contaId && e.baixadaEm === null),
     );
   }
 

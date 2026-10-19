@@ -110,6 +110,35 @@ describe('freio: buscarParaAtualizar (R1)', () => {
     expect(await falhaSimultanea(criarIdentidadeEmMemoria(), false)).toEqual([1]);
   });
 
+  it('a unidade que segurava a trava apagou o freio zerado: a que esperava recebe um freio novo (A-R1)', async () => {
+    const identidade = criarIdentidadeEmMemoria();
+    await identidade.unidade.executar(async () => {
+      const freio = await identidade.bloqueios.buscarParaAtualizar('chave', 'email', AGORA);
+      freio.registrarFalha(AGORA);
+      await identidade.bloqueios.salvar(freio);
+    });
+    let liberar: () => void = () => undefined;
+    const liberada = new Promise<void>((resolver) => {
+      liberar = resolver;
+    });
+    const zerar = identidade.unidade.executar(async () => {
+      const freio = await identidade.bloqueios.buscarParaAtualizar('chave', 'email', AGORA);
+      freio.registrarSucesso('senha');
+      await identidade.bloqueios.salvar(freio);
+      await liberada;
+    });
+    await proximaVolta();
+    const esperando = identidade.unidade.executar(() =>
+      identidade.bloqueios.buscarParaAtualizar('chave', 'email', depois(1_000)),
+    );
+    await proximaVolta();
+    liberar();
+    await zerar;
+
+    const lido = await esperando;
+    expect(lido.dados).toEqual(BloqueioDeLogin.novo('chave', 'email', depois(1_000)).dados);
+  });
+
   it('a linha zerada criada pela leitura some se a unidade falhar', async () => {
     const identidade = criarIdentidadeEmMemoria();
     await expect(

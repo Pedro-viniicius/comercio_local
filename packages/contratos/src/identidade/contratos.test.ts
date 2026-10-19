@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CABECALHO_DO_CLIENTE,
   camposDoErroZod,
+  clienteDoAppSchema,
   codigoDeRecuperacaoSchema,
   codigoDoAutenticadorSchema,
   codigoSchema,
@@ -324,16 +325,47 @@ describe('sessões', () => {
   });
 
   it('renovação nos apps leva o token; formato estranho é recusado sem repetir o valor', () => {
-    expect(renovarSessaoSchema.safeParse({ tokenRenovacao: 'abc_DEF-123' }).success).toBe(true);
+    const cliente = 'app_consumidor';
+    expect(renovarSessaoSchema.safeParse({ tokenRenovacao: 'abc_DEF-123', cliente }).success).toBe(
+      true,
+    );
     expect(CABECALHO_DO_CLIENTE).toBe('X-Cliente');
     for (const tokenRenovacao of ['com espaço', 'a'.repeat(513), 'tok"en']) {
-      const [campo] = campos(renovarSessaoSchema, { tokenRenovacao });
+      const [campo] = campos(renovarSessaoSchema, { tokenRenovacao, cliente });
       expect(campo).toEqual({
         campo: 'tokenRenovacao',
         codigo: 'invalido',
         motivo: 'Token inválido',
       });
     }
+  });
+
+  it('renovação pelo corpo exige o cliente do app; painel e outros valores dão 400 (S16)', () => {
+    const tokenRenovacao = 'abc_DEF-123';
+    for (const cliente of ['app_consumidor', 'app_lojista']) {
+      expect(renovarSessaoSchema.parse({ tokenRenovacao, cliente })).toEqual({
+        tokenRenovacao,
+        cliente,
+      });
+      expect(clienteDoAppSchema.safeParse(cliente).success, cliente).toBe(true);
+    }
+    // Ausente também é `invalido`, como o `cliente` de entrar: o motivo lista as opções.
+    expect(campos(renovarSessaoSchema, { tokenRenovacao })).toEqual([
+      {
+        campo: 'cliente',
+        codigo: 'invalido',
+        motivo: 'Opção inválida: esperava uma das seguintes opções: "app_consumidor"|"app_lojista"',
+      },
+    ]);
+    for (const cliente of ['painel', 'admin', 'APP_CONSUMIDOR', '', null, 1]) {
+      const resultado = campos(renovarSessaoSchema, { tokenRenovacao, cliente });
+      expect(resultado, JSON.stringify(cliente)).toHaveLength(1);
+      expect(resultado[0], JSON.stringify(cliente)).toMatchObject({
+        campo: 'cliente',
+        codigo: 'invalido',
+      });
+    }
+    expect(clienteDoAppSchema.safeParse('painel').success).toBe(false);
   });
 });
 
@@ -528,7 +560,11 @@ const CORPOS = [
     entrarSchema,
     { email: 'ana@exemplo.com', senha: 'senha atual', cliente: 'painel' },
   ],
-  ['POST /v1/sessoes/renovacao', renovarSessaoSchema, { tokenRenovacao: 'abc.def-ghi_jkl' }],
+  [
+    'POST /v1/sessoes/renovacao',
+    renovarSessaoSchema,
+    { tokenRenovacao: 'abc.def-ghi_jkl', cliente: 'app_lojista' },
+  ],
   ['POST /v1/senha/recuperacao', solicitarRecuperacaoSchema, { email: 'ana@exemplo.com' }],
   [
     'POST /v1/senha/redefinicao',
@@ -728,11 +764,15 @@ describe('um erro por campo e motivo sem o valor recebido (CA-12, CA-13, QA)', (
 
   it('o token só aceita base64url, ponto e hífen: espaço e letra acentuada são recusados', () => {
     for (const tokenRenovacao of ['abc def', 'abc\tdef', 'tóken', 'abc+def', 'abc/def', 'abc=']) {
-      expect(campos(renovarSessaoSchema, { tokenRenovacao }), tokenRenovacao).toEqual([
-        { campo: 'tokenRenovacao', codigo: 'invalido', motivo: 'Token inválido' },
-      ]);
+      expect(
+        campos(renovarSessaoSchema, { tokenRenovacao, cliente: 'app_consumidor' }),
+        tokenRenovacao,
+      ).toEqual([{ campo: 'tokenRenovacao', codigo: 'invalido', motivo: 'Token inválido' }]);
     }
-    expect(renovarSessaoSchema.safeParse({ tokenRenovacao: 'v1.AbC-d_e.f' }).success).toBe(true);
+    expect(
+      renovarSessaoSchema.safeParse({ tokenRenovacao: 'v1.AbC-d_e.f', cliente: 'app_consumidor' })
+        .success,
+    ).toBe(true);
   });
 
   it('a senha de login vale até 128 pontos de código e a de cadastro também', () => {

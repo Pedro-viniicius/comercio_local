@@ -12,6 +12,15 @@
 // Este módulo tem efeito colateral e o bundler não pode descartá-lo. Se algum dia o pacote ganhar `"sideEffects": false`, liste este arquivo.
 import { z } from 'zod';
 
+// No navegador, sem JIT (S87): o zod 4 sonda `new Function` ao construir o primeiro objeto e, sob a
+// CSP do painel (sem `unsafe-eval`), a sonda gera uma violação a cada abertura, mesmo com o erro
+// engolido. Com `jitless`, nenhum esquema compila código em tempo de execução; a validação é a
+// mesma, só sem o atalho compilado. Vale antes de qualquer esquema, porque cada objeto decide o JIT
+// ao nascer. Na API e nos testes do Node (sem `document`), o JIT continua.
+if ('document' in globalThis) {
+  z.config({ jitless: true });
+}
+
 /** Motivo para campo ausente ou texto vazio. O `problema.ts` o usa para achar o código `obrigatorio`. */
 export const MOTIVO_OBRIGATORIO = 'Campo obrigatório.';
 /** Motivo para campo que o esquema estrito não conhece. */

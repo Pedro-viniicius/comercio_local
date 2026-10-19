@@ -22,8 +22,11 @@ export type Privacidade = z.infer<typeof privacidadeSchema>;
  * S14). A exportação (`POST /v1/privacidade/exportacao`) não tem corpo
  * (`corpoVazioSchema`) e responde 202, uma por 24 h; o arquivo sai em `GET
  * /v1/privacidade/exportacao/arquivo` (uso único, 7 dias). Respostas da
- * exclusão: 202, ou 409 `exclusao_com_pendencias` com o aviso de pendências
- * (CA-11).
+ * exclusão: 202; 400 `campos[senha].invalido` com a senha errada; 409
+ * `exclusao_com_pendencias` com o aviso de pendências (CA-11); 429 com
+ * `Retry-After` no freio por e-mail. A senha errada não dá 401: numa rota
+ * autenticada, só a guarda devolve 401 (sessão ausente ou inválida), e o
+ * cliente renovaria a sessão e repetiria o pedido.
  */
 export const solicitarExclusaoSchema = objetoEstrito({ senha: senhaAtualSchema });
 export type SolicitarExclusao = z.infer<typeof solicitarExclusaoSchema>;

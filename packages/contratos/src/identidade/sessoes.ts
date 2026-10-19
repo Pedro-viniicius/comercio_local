@@ -68,10 +68,30 @@ export const respostaDeEntrarSchema = z.union([sessaoSchema, desafioDeSegundoFat
 export type RespostaDeEntrar = z.infer<typeof respostaDeEntrarSchema>;
 
 /**
- * `POST /v1/sessoes/renovacao` (público) nos apps. O painel manda o cookie e o
- * cabeçalho `X-Cliente: painel`, com corpo vazio (`corpoVazioSchema`).
- * Resposta: 200 com `sessaoSchema`, ou 401. O logout (`DELETE
- * /v1/sessoes/atual`) não tem corpo e responde 204.
+ * Cliente que renova pelo corpo: só os apps. O painel renova pelo cookie, então
+ * `painel` no corpo é recusado.
  */
-export const renovarSessaoSchema = objetoEstrito({ tokenRenovacao: tokenSchema });
+export const clienteDoAppSchema = z.enum(CLIENTES).exclude(['painel']);
+export type ClienteDoApp = z.infer<typeof clienteDoAppSchema>;
+
+/**
+ * `POST /v1/sessoes/renovacao` (público) nos apps, com o token de renovação e o
+ * `cliente` do app. A API compara o `cliente` desta requisição, nunca o da
+ * sessão, para devolver o par da tolerância de 60 s (S16); entre os dois apps
+ * ele só recusa engano. O painel manda o cookie e o cabeçalho `X-Cliente:
+ * painel`, com corpo vazio (`corpoVazioSchema`). Respostas: 200 com
+ * `sessaoSchema`; 400 com o corpo fora do contrato; 401 com a credencial
+ * inválida, vencida, revogada ou reusada (nunca 5xx).
+ *
+ * Logout, sem corpo nos dois sentidos. Apps: `DELETE /v1/sessoes/atual` com
+ * o Bearer revoga a sessão inteira e responde 204, também se ela já estava
+ * revogada (401 só da guarda, com o Bearer inválido). Painel: `DELETE
+ * /v1/sessoes/renovacao` (público), com o cookie e `X-Cliente: painel`,
+ * revoga a sessão do cookie, se houver, apaga o cookie e responde 204 sempre
+ * (S80).
+ */
+export const renovarSessaoSchema = objetoEstrito({
+  tokenRenovacao: tokenSchema,
+  cliente: clienteDoAppSchema,
+});
 export type RenovarSessao = z.infer<typeof renovarSessaoSchema>;

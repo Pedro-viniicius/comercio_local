@@ -14,4 +14,5 @@ Conferido em 2026-10-17 (01b, etapa 5 e correção S80/Q18):
 - Testes do qa contam voltas de microtarefa (`for (5x) await Promise.resolve()`) antes de conferir que a sessão foi limpa: um `await` a mais antes de `encerrarNoAparelho` (ex.: ler outro armazenamento) reprova. Faça a limpeza síncrona logo depois de `obterSessao` e leia o resto em paralelo.
 - `@typescript-eslint/no-base-to-string` reprova `String(x)` com `x: unknown` no teste; use `JSON.stringify(x) ?? ''`.
 
+- Desde a 5c (2026-10-18), `OpcoesDoClienteAutenticado` é união: `modoDeRenovacao: 'token'` exige `clienteDoApp` (o nome `cliente` já é o `ClienteApi`), e `criarClienteAutenticado` lança `TypeError` sem ele. Os `montar` dos testes passam `clienteDoApp: 'app_consumidor'` sempre (o ramo `cookie` aceita e ignora), e os corpos de renovação esperados nos testes levam `cliente`. Testes que simulam a API podem validar o corpo com `renovarSessaoSchema` real (400 se faltar o `cliente`).
 **How to apply:** etapas 12 (provedor de sessão no `mobile-base`) e 15 (painel) usam este cliente; ver [[tsconfig-sem-dom]] para os `declare` de `setTimeout` nos testes.

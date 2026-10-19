@@ -2,6 +2,26 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-19 — Decisão do dono: terceira rodada no grupo C, freio de IP pela reserva e P16
+- Terceira rodada: depois de duas rodadas no grupo C do 01b, sobrou um achado obrigatório, R8 do `revisor` e Q25 do `qa`. No passo 3 da configuração do 2FA no painel, a interação entre 28 e 30 min era ignorada e os códigos de recuperação se perdiam. O dono autorizou uma terceira rodada para o R8 e para as sugestões baratas: A-R13 (a CLI do 2FA trava o freio por e-mail), limpeza local da sessão ao receber `outra_aba`, R10, A-R11 e A-R14. Depois vêm o commit e o push do grupo C.
+- Risco aceito (A-R12): com a reserva da tentativa (S91), um login com a senha certa conta provisoriamente como falha no freio de IP até a senha ser conferida. Se a reserva for a 50ª falha da origem, ou se houver muitos logins simultâneos atrás do mesmo CGNAT, o IP fica freado por 1 min para novos logins. A pessoa com a senha certa entra. É falha fechada. Reabre se houver queixa medida de bloqueio em rede de operadora.
+- P16 confirmada:
+  - o freio de segundo fator acionado de novo no nível máximo, sem 2FA concluído, apaga a senha do admin, e a recuperação vai por e-mail;
+  - no máximo 10 códigos por e-mail por conta e finalidade a cada 24 h;
+  - implementação na etapa 13 (S92, S93).
+- O dono escolheu as opções recomendadas pelo lead.
+
+## 2026-10-19 — Decisão do dono: risco aceito do CA-02 com login antes da verificação (S100)
+- Contexto: o `seguranca` (S100, revisão do grupo C do 01b) mostrou que o CA-02 ("e-mail já cadastrado recebe a mesma resposta") pode ser contornado: cadastra-se o e-mail com uma senha qualquer e tenta-se entrar com ela. Se o login funcionar, o e-mail estava livre. É consequência do P1-dono, que deixa entrar antes de verificar o e-mail.
+- Decisão: aceitar o risco e manter o login antes da verificação. A mitigação é o limite de requisições por origem da etapa 16, que torna essa descoberta lenta e cara em escala. O risco fica junto do já registrado "conta criada com e-mail alheio".
+- Reabre a decisão: um vazamento de base de e-mails do Bairrin, abuso medido em produção, ou um requisito legal que exija sigilo de cadastro.
+- O dono escolheu a opção recomendada pelo lead.
+
+## 2026-10-19 — Decisão do dono: lógica de sessão do painel como regra de negócio
+- Contexto: o `revisor` (R3, grupo C do 01b) apontou que a lógica de sessão do painel (cookie, marca de logout pendente, inatividade, sinais entre abas) estava numa pasta visual, que o `designer` edita. Ela foi movida para `apps/painel/src/sessao/`.
+- Decisão: `apps/painel/src/sessao/**` entra na lista de regra de negócio do `CLAUDE.md`, como `packages/mobile-base/src/sessao/**`.
+- O dono autorizou a mudança no `CLAUDE.md`.
+
 ## 2026-10-18 — Decisão do dono: terceira rodada na etapa 5b (S85)
 - Contexto: na rodada 2 da etapa 5b, o `seguranca` deu BLOQUEANTE pelo S85 (ALTA). Uma senha de 128 caracteres feita com caracteres que se expandem na normalização NFKC, mais um trecho longo de símbolos, custava de 350 a 700 ms de CPU por requisição numa rota pública. O lead mediu 354 ms por chamada.
 - Decisão: uma terceira rodada na 5b só para o S85 (corrigir a complexidade da regra composta e limitar o trabalho pelo tamanho normalizado, com testes de tempo), conferida pelo `seguranca`. Entra no mesmo commit do grupo B.

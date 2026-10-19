@@ -90,6 +90,37 @@ describe('Sessao.criar', () => {
     expect(sessao.dados.expiraAbsolutoEm).toEqual(depois(DURACAO_MAXIMA_NO_PAINEL_EM_MS));
   });
 
+  it('no painel, a substituta herda o teto da sessão anterior e não vive além dele (S101)', () => {
+    const teto = depois(2 * MINUTO);
+    const sessao = novaSessao({ cliente: 'painel', mfa: false, tetoHerdado: teto });
+    expect(sessao.dados.expiraAbsolutoEm).toEqual(teto);
+    expect(sessao.dados.expiraEm).toEqual(teto);
+  });
+
+  it('teto herdado depois das 12 h a partir de agora: fica o de agora', () => {
+    const sessao = novaSessao({
+      cliente: 'painel',
+      tetoHerdado: depois(DURACAO_MAXIMA_NO_PAINEL_EM_MS + MINUTO),
+    });
+    expect(sessao.dados.expiraAbsolutoEm).toEqual(depois(DURACAO_MAXIMA_NO_PAINEL_EM_MS));
+  });
+
+  it('teto herdado nulo: o teto conta de agora, nos apps e no painel', () => {
+    expect(novaSessao({ tetoHerdado: null }).dados.expiraAbsolutoEm).toBeNull();
+    expect(novaSessao({ cliente: 'painel', tetoHerdado: null }).dados.expiraAbsolutoEm).toEqual(
+      depois(DURACAO_MAXIMA_NO_PAINEL_EM_MS),
+    );
+  });
+
+  it.each(['app_consumidor', 'app_lojista'] as const)(
+    'teto herdado só existe no painel: recusa em %s',
+    (cliente) => {
+      expect(() => novaSessao({ cliente, tetoHerdado: depois(MINUTO) })).toThrow(
+        OperacaoInvalidaNaSessao,
+      );
+    },
+  );
+
   it('aceita a família de uma sessão anterior', () => {
     expect(novaSessao({ familiaId: FAMILIA }).familiaId).toBe(FAMILIA);
   });

@@ -34,6 +34,42 @@ describe('Cartao', () => {
     expect(screen.getByRole('region', { name: 'Recuperar senha' })).toBeTruthy();
   });
 
+  it('o cabeçalho (D4) fica dentro da seção, antes do título, com o logo e o "Sair"', () => {
+    const { container } = render(
+      <Cartao
+        titulo="Configurar"
+        cabecalho={
+          <>
+            <img src="logo.svg" alt="Bairrin" />
+            <button type="button">Sair</button>
+          </>
+        }
+      >
+        <p>Conteúdo</p>
+      </Cartao>,
+    );
+
+    const secao = screen.getByRole('region', { name: 'Configurar' });
+    const cabecalho = secao.querySelector('.ui-cartao__cabecalho');
+    expect(cabecalho).not.toBeNull();
+    expect(cabecalho?.querySelector('img')?.getAttribute('alt')).toBe('Bairrin');
+    expect(screen.getByRole('button', { name: 'Sair' }).closest('.ui-cartao__cabecalho')).toBe(
+      cabecalho,
+    );
+    // Ordem no DOM (e de foco): cabeçalho, título, conteúdo.
+    const filhos = [...(secao.children as HTMLCollectionOf<HTMLElement>)];
+    expect(filhos[0]).toBe(cabecalho);
+    expect(filhos[1]?.tagName).toBe('H1');
+    expect(container.querySelectorAll('.ui-cartao__cabecalho')).toHaveLength(1);
+  });
+
+  it('sem cabeçalho, não cria a faixa vazia', () => {
+    const { container, rerender } = render(<Cartao titulo="Entrar" />);
+    expect(container.querySelector('.ui-cartao__cabecalho')).toBeNull();
+    rerender(<Cartao titulo="Entrar" cabecalho={null} />);
+    expect(container.querySelector('.ui-cartao__cabecalho')).toBeNull();
+  });
+
   it('sem `centralizado`, não cria o fundo; com ele, envolve o cartão', () => {
     const { container, rerender } = render(<Cartao titulo="Entrar" />);
     expect(container.querySelector('.ui-cartao-fundo')).toBeNull();

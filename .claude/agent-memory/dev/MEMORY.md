@@ -1,10 +1,10 @@
 - [Armadilhas do pnpm 12](pnpm12-armadilhas.md) — .npmrc ignorado, allowBuilds reescrito, minimumReleaseAge em minutos, --lockfile-only, pares opcionais do Vite
 - [Nest 12 em runtime e testes](nest12-runtime.md) — tsc com rewrite de .ts, tsx quebra DI, Vitest 5 sem SWC, condição @bairrin/fonte
 - [Base HTTP e logs no Nest 12](nest12-http-logs.md) — singleton do nestjs-pino, vínculos de filho, hook logMethod, context = pilha nos hooks, lint de log
-- [Zod 4 em contratos](zod4-contratos.md) — locale ptBR, marcador de obrigatório, sem .min/.max em texto (Q14), superRefine sempre roda, "antes" via dist
+- [Zod 4 em contratos](zod4-contratos.md) — locale ptBR, marcador de obrigatório, sem .min/.max (Q14), superRefine, enum ausente = invalido, jitless (S87)
 - [Infra local em Docker](infra-local-docker.md) — trust no pg_hba, sem psql no host, tmpfs do teste, REVOKE em public, testes de catálogo (dono/ROLLBACK)
 - [tsconfig sem DOM/Node](tsconfig-sem-dom.md) — como tipar fetch/AbortController/timers em pacotes compartilhados; lint de reject
-- [Painel: Vite, Vitest e tokens CSS](painel-vite-vitest.md) — CSS virtual vira arquivo, config lê tokens por runnerImport, Vitest esvazia .css, env.d.ts
+- [Painel: Vite, Vitest e tokens CSS](painel-vite-vitest.md) — CSS virtual, ?no-inline e QR em SVG (CSP), fake timers+RTL, react-hooks 7, sonda de CSP no Chrome 152, BroadcastChannel no jsdom
 - [Imagem do painel: Caddy e Fly](painel-caddy-docker.md) — handle_errors p/ cabeçalhos, capability do binário, contexto do fly deploy, CSP no Chrome headless
 - [Prisma 7 e banco](prisma7-banco.md) — multiSchema, `migracoes`, client em src, diff offline, enum sem USAGE, CASCADE como dono, spawn de cli .ts
 - [Verificador de migrações](verificador-migracoes.md) — visões alinhadas, $tag$ fecha no 1º delimitador, EXECUTE, brechas, ACL/dono no catálogo (P8 só de bairrin_migracao), sonda PG
@@ -12,6 +12,11 @@
 - [pg-boss, outbox e e-mail](pgboss-eventos-email.md) — pg-boss sem CREATE (CLI + GRANTs), output do job guarda erro, nodemailer 10, Mailpit, lint
 - [Docs: comandos verificados](docs-comandos-verificados.md) — Prisma CLI a partir de apps/api, cópia limpa real, node --run sem env-file, Prettier, EAS pago
 - [Deploy, TLS e Sentry](deploy-imagem-tls-sentry.md) — Sentry 11 sem sendDefaultPii, sessões/release, env lido pelo SDK, Prisma verify-full + receita da sonda TLS, actionlint
-- [Cliente autenticado e fila única](cliente-api-sessao.md) — laço de microtarefas trava o Vitest, ??= com finally, promessa adiada sem rejeitar, mutação em lote
+- [Cliente autenticado e fila única](cliente-api-sessao.md) — microtarefas travam o Vitest, ??= com finally, promessa adiada, clienteDoApp obrigatório (5c)
 - [Lista pública de senhas comuns](senhas-comuns-lista-publica.md) — fica só na API, licenças do zxcvbn pt-br, API de sobrenomes do IBGE, refine de corpo pulado, literal no .d.ts
 - [Domínio de Identidade](identidade-dominio.md) — CHECKs no domínio, fakes com ALS e travas, portas ParaAtualizar, trigger do expurgo, docs só pelo dono
+- [Cripto da Identidade](cripto-identidade.md) — const enum do argon2, verify lança, Secret do otpauth vaza caractere, iat do jsonwebtoken, tsc isolado
+- [Casos de uso da Identidade](casos-de-uso-identidade.md) — travas conta→sessões, sentinela, reserva da tentativa (S91), comum/chaves.ts, portas de uma coluna, limite da exportação
+- [Privacidade da Identidade](identidade-privacidade.md) — pendências aguardam (spec Q2 aberta), chave do freio por e-mail, uso único por marcarBaixada booleano, tsc isolado
+- [2FA do admin](identidade-2fa.md) — helpers em segundo-fator/comum.ts, emissão invalida desafios, teste do R8 nos fakes, CLI por createApplicationContext
+- [Repositórios Prisma da Identidade](repositorios-prisma-identidade.md) — erro do PG aborta a transação, ON CONFLICT DO UPDATE no freio, NO KEY UPDATE x FK, pausa do qa, pg_locks, S78

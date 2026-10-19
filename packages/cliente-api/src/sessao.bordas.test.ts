@@ -135,6 +135,7 @@ function montar(fetch: FetchInjetavel, inicial: Sessao | null, modo: ModoDeRenov
     armazenamento: guarda.armazenamento,
     revogacaoPendente: semRevogacaoPendente(),
     modoDeRenovacao: modo,
+    clienteDoApp: 'app_consumidor',
     aoEncerrarSessao: (motivo) => encerramentos.push(motivo),
   });
   const pedirConta = () => autenticado.requisitar({ caminho: '/v1/conta', esquema: contaSchema });
@@ -153,8 +154,8 @@ describe('segundo ciclo de expiração (CA-05, renovação silenciosa)', () => {
     await expect(pedirConta()).resolves.toEqual({ nome: 'Conta' });
 
     expect(servidor.corposDaRenovacao).toEqual([
-      { tokenRenovacao: 'renovacao-1_bbb' },
-      { tokenRenovacao: 'renovacao-2_bbb' },
+      { tokenRenovacao: 'renovacao-1_bbb', cliente: 'app_consumidor' },
+      { tokenRenovacao: 'renovacao-2_bbb', cliente: 'app_consumidor' },
     ]);
     expect(guardado()).toEqual(sessaoN(3));
     expect(encerramentos).toEqual([]);
@@ -170,8 +171,8 @@ describe('segundo ciclo de expiração (CA-05, renovação silenciosa)', () => {
     await Promise.all(Array.from({ length: 5 }, pedirConta));
 
     expect(servidor.corposDaRenovacao).toEqual([
-      { tokenRenovacao: 'renovacao-1_bbb' },
-      { tokenRenovacao: 'renovacao-2_bbb' },
+      { tokenRenovacao: 'renovacao-1_bbb', cliente: 'app_consumidor' },
+      { tokenRenovacao: 'renovacao-2_bbb', cliente: 'app_consumidor' },
     ]);
     expect(guardado()).toEqual(sessaoN(3));
   });
@@ -189,7 +190,9 @@ describe('a renovação em si', () => {
     const nomes = Object.keys(renovacao?.pedido.headers ?? {}).map((nome) => nome.toLowerCase());
     expect(nomes).not.toContain('authorization');
     expect(JSON.stringify(renovacao?.pedido.headers)).not.toContain('renovacao-1');
-    expect(renovacao?.pedido.body).toBe('{"tokenRenovacao":"renovacao-1_bbb"}');
+    expect(renovacao?.pedido.body).toBe(
+      '{"tokenRenovacao":"renovacao-1_bbb","cliente":"app_consumidor"}',
+    );
   });
 
   it('no painel (cookie) também não leva Authorization nem corpo', async () => {
@@ -223,6 +226,7 @@ describe('leitura lenta do armazenamento', () => {
       },
       revogacaoPendente: semRevogacaoPendente(),
       modoDeRenovacao: 'token',
+      clienteDoApp: 'app_consumidor',
     });
 
     const primeiro = autenticado.obterSessao();
@@ -256,6 +260,7 @@ describe('leitura lenta do armazenamento', () => {
       },
       revogacaoPendente: semRevogacaoPendente(),
       modoDeRenovacao: 'token',
+      clienteDoApp: 'app_consumidor',
       aoEncerrarSessao: (motivo) => encerramentos.push(motivo),
     });
 
@@ -346,6 +351,7 @@ describe('troca de conta e logout lento (S11)', () => {
       armazenamento: guarda.armazenamento,
       revogacaoPendente: semRevogacaoPendente(),
       modoDeRenovacao: 'token',
+      clienteDoApp: 'app_consumidor',
       aoEncerrarSessao: (motivo) => eventos.push(`aviso:${motivo}`),
     });
 
@@ -390,8 +396,8 @@ describe('troca de conta e logout lento (S11)', () => {
     await pedidoDaA;
 
     expect(corpos).toEqual([
-      '{"tokenRenovacao":"renovacao-1_bbb"}',
-      '{"tokenRenovacao":"renovacao-7_bbb"}',
+      '{"tokenRenovacao":"renovacao-1_bbb","cliente":"app_consumidor"}',
+      '{"tokenRenovacao":"renovacao-7_bbb","cliente":"app_consumidor"}',
     ]);
     expect(guardado()).toEqual(sessaoN(8));
   });
@@ -404,7 +410,9 @@ describe('abrir o app e sair sem sessão', () => {
 
     const renovada = await autenticado.renovarSessao();
 
-    expect(servidor.corposDaRenovacao).toEqual([{ tokenRenovacao: 'renovacao-1_bbb' }]);
+    expect(servidor.corposDaRenovacao).toEqual([
+      { tokenRenovacao: 'renovacao-1_bbb', cliente: 'app_consumidor' },
+    ]);
     expect(renovada).toEqual(sessaoN(2));
   });
 

@@ -14,6 +14,7 @@ export default defineConfig(
     '**/dist/',
     '**/coverage/',
     '**/.expo/',
+    '**/.vercel/',
     'apps/*/android/',
     'apps/*/ios/',
     'docs/',

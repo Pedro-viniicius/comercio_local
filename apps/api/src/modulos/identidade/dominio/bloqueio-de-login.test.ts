@@ -126,6 +126,50 @@ describe('BloqueioDeLogin: por IP e por segundo fator (S14, S1)', () => {
   });
 });
 
+describe('BloqueioDeLogin: estorno da falha reservada (S91)', () => {
+  it('a falha reservada sai no sucesso: 10 falhas, uma reserva e o estorno deixam 10', () => {
+    const bloqueio = BloqueioDeLogin.novo('chave', 'ip', AGORA);
+    falhar(bloqueio, 10, 0);
+    const antes = bloqueio.dados;
+    bloqueio.registrarFalha(depois(20 * SEGUNDO));
+    expect(bloqueio.dados.falhas).toBe(11);
+    bloqueio.estornarFalha(depois(20 * SEGUNDO));
+    expect(bloqueio.dados).toEqual(antes);
+  });
+
+  it('a reserva que abriu a janela, estornada, deixa o freio sem falha', () => {
+    const bloqueio = BloqueioDeLogin.novo('chave', 'ip', AGORA);
+    bloqueio.registrarFalha(AGORA);
+    bloqueio.estornarFalha(AGORA);
+    expect(bloqueio.dados.falhas).toBe(0);
+    expect(bloqueio.estaZerado).toBe(true);
+  });
+
+  it('sem falha contada, o estorno não deixa a contagem negativa', () => {
+    const bloqueio = BloqueioDeLogin.novo('chave', 'ip', AGORA);
+    bloqueio.estornarFalha(AGORA);
+    expect(bloqueio.dados.falhas).toBe(0);
+  });
+
+  it('a janela recomeçou depois da reserva: a falha dela não conta mais e nada sai', () => {
+    const bloqueio = BloqueioDeLogin.novo('chave', 'ip', AGORA);
+    bloqueio.registrarFalha(AGORA);
+    // Outra requisição falhou 16 min depois e abriu uma janela nova.
+    bloqueio.registrarFalha(depois(16 * MINUTO));
+    bloqueio.estornarFalha(AGORA);
+    expect(bloqueio.dados.falhas).toBe(1);
+  });
+
+  it('a reserva que acionou a espera não é desfeita: a espera fica (falha fechada)', () => {
+    const bloqueio = BloqueioDeLogin.novo('chave', 'ip', AGORA);
+    falhar(bloqueio, 50, 0, 100);
+    expect(bloqueio.estaBloqueado(depois(4_900))).toBe(true);
+    const antes = bloqueio.dados;
+    bloqueio.estornarFalha(depois(4_900));
+    expect(bloqueio.dados).toEqual(antes);
+  });
+});
+
 describe('estados recusados pelos CHECKs de identidade.bloqueios_login', () => {
   const base: DadosDoBloqueioDeLogin = BloqueioDeLogin.novo('chave', 'email', AGORA).dados;
 

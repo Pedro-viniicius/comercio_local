@@ -12,6 +12,6 @@ Conferido em 2026-10-16 (etapa 15 do 01a; caddy:2.11.7-alpine, node:22.23.3-trix
 - `caddy validate`/`caddy fmt` rodam na própria imagem com o Caddyfile montado.
 - Vite carrega `vite.config.ts` SEM a condição `@bairrin/fonte`. Desde 2026-10-16 o config lê os tokens pelo fonte (`runnerImport`, ver [[painel-vite-vitest]]) e `pnpm --filter painel build` passa num clone limpo; o Dockerfile ainda usa `pnpm --filter painel... run build` (topológico), o que não atrapalha.
 - flyctl resolve `[build] dockerfile` relativo à pasta do fly.toml; o contexto é o diretório do `fly deploy` (raiz). `fly deploy -c apps/painel/fly.toml` a partir da raiz.
-- Prova de CSP sem navegador de teste no repo: `google-chrome --headless=new --enable-logging=stderr --v=0 --virtual-time-budget=8000 --dump-dom URL` loga violações como `INFO:CONSOLE ... violates the following Content Security Policy`. Faça um controle negativo (página com inline sob a mesma CSP) para provar que o log aparece.
+- Prova de CSP sem navegador de teste no repo: o log `INFO:CONSOLE` do `--enable-logging` parou de sair no Chrome 152 (2026-10-19); use a sonda `securitypolicyviolation` descrita em [[painel-vite-vitest]]. Faça sempre um controle negativo para provar que a sonda pega a violação.
 
 **How to apply:** imagem da API (etapa 13), mudanças no painel que mexam em CSP (fontes, imagens, Sentry: `connect-src` precisa do ingest), homologação com outra URL de API. Ver [[painel-vite-vitest]].

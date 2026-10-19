@@ -1,3 +1,3 @@
 - [Áreas sensíveis](areas-sensiveis.md) — onde mora dado pessoal, entradas públicas, auth e invariantes do Bairrin
-- [Riscos aceitos](riscos-aceitos.md) — aceites explícitos do dono (P5 do 01b; pendências de registro e de decisão)
+- [Riscos aceitos](riscos-aceitos.md) — aceites explícitos do dono (P5, S100 e A-R12 do 01b; pendências de decisão: EAS Update, EXPO_TOKEN)
 - [Problemas recorrentes](problemas-recorrentes.md) — falhas a procurar sempre em planos e código

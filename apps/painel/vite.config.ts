@@ -60,7 +60,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
-    // Deixa o teste ler `pagina.css?raw` e `componentes.css?raw` (por padrão o Vitest esvazia os `.css`).
-    css: { include: [/(pagina|componentes)\.css/] },
+    // Deixa o teste ler `pagina.css?raw`, `componentes.css?raw` e `autenticacao.css?raw` (por padrão
+    // o Vitest esvazia os `.css`).
+    css: { include: [/(pagina|componentes|autenticacao)\.css/] },
   },
 });

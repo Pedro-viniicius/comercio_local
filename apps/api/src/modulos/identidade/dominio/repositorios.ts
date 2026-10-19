@@ -17,9 +17,12 @@
 // com trava, e os casos de uso das etapas 8 a 11 chamam esses métodos DENTRO da
 // `UnidadeDeTrabalho` em que gravam (fora dela, a trava acaba no fim do comando
 // e não protege nada; os fakes recusam):
-// - freio: `RepositorioDeBloqueios.buscarParaAtualizar` (`SELECT ... FOR
-//   UPDATE`, depois de `INSERT ... ON CONFLICT DO NOTHING` para a chave nova
-//   também ter linha a travar), e então `salvar`;
+// - freio: `RepositorioDeBloqueios.buscarParaAtualizar` (um `INSERT ... ON
+//   CONFLICT DO UPDATE ... RETURNING`, que trava a linha, existente ou nova, num
+//   comando só), e então `salvar`;
+// - conta: `RepositorioDeContas.buscarPorIdParaAtualizar` (`SELECT ... FOR NO
+//   KEY UPDATE`), quando o caso de uso decide pelo estado da conta e não pode
+//   cruzar com outro que decide o mesmo (anonimização, limite da exportação);
 // - código por e-mail: `RepositorioDeCodigosDeVerificacao.buscarVigenteParaAtualizar`,
 //   e então `atualizar`;
 // - desafio do 2FA: `RepositorioDeDesafios.buscarPorIdParaAtualizar`, e então
@@ -30,7 +33,20 @@
 //   muda só as colunas da revogação e nunca a desfaz (R7).
 // A segunda requisição espera a primeira terminar e lê o que ela gravou. Para
 // não haver deadlock, trave sempre na mesma ordem: o desafio antes do freio de
-// segundo fator, e o freio de e-mail antes do de IP.
+// segundo fator, e o freio de e-mail antes do de IP. Todo UPDATE também trava a
+// linha até o fim da transação: a conta (`atualizar`, `gravarUltimoLogin`) vem
+// antes das sessões dela (`gravarRotacao`, `atualizar`, `revogarDaConta`), como
+// na exclusão, que desativa a conta e depois revoga as sessões. A renovação que
+// gravasse a rotação antes de `gravarUltimoLogin` cruzaria com a exclusão, e o
+// Postgres abortaria uma das duas (40P01). Pelo mesmo motivo, os desafios do
+// 2FA vêm antes da conta: o segundo fator trava o desafio e só depois grava o
+// login, então a redefinição de senha invalida os desafios (S94) antes de
+// gravar a senha nova. Juntando tudo, quem trava o freio por e-mail o trava
+// antes de qualquer outra coisa: freio por e-mail → (freio de origem, no login)
+// → código ou desafios → freio de segundo fator → segundo fator → conta →
+// sessões. É assim no login, na redefinição, na exclusão e na CLI de
+// reconfiguração do 2FA (A-R13), que trava o freio por e-mail da conta para
+// serializar com o login que já conferiu a senha antiga.
 import type { EtapaDoDesafio } from '@bairrin/contratos/validadores';
 import type { BloqueioDeLogin, TipoDeBloqueio } from './bloqueio-de-login.ts';
 import type { CodigoDeVerificacao, FinalidadeDoCodigo } from './codigo-de-verificacao.ts';
@@ -48,8 +64,91 @@ export abstract class RepositorioDeContas {
   abstract buscarPorEmail(email: Email): Promise<Conta | null>;
   /** Grava a conta e os perfis. Lança `EmailJaCadastrado` se o e-mail já tem conta. */
   abstract inserir(conta: Conta): Promise<void>;
-  /** Grava o estado atual da conta, inclusive perfis novos. */
+  /**
+   * A conta, travada até o fim da unidade de trabalho (`SELECT ... FOR NO KEY
+   * UPDATE`), ou `null` se não existe. A segunda unidade que pede a mesma conta
+   * espera a primeira terminar e lê o que ela gravou: duas anonimizações não
+   * publicam duas vezes, e dois pedidos de exportação não passam os dois pelo
+   * limite. O nível `NO KEY UPDATE` é o mesmo de um UPDATE de colunas comuns:
+   * não espera quem só insere uma linha filha (a FK trava a conta com `KEY
+   * SHARE`), então inserir a filha antes de travar a conta não cruza com outra
+   * unidade que fez o mesmo. Na ordem das travas, a conta vem antes das
+   * sessões. Chamado dentro da unidade de trabalho.
+   */
+  abstract buscarPorIdParaAtualizar(id: string): Promise<Conta | null>;
+  /**
+   * Grava o estado inteiro da conta, inclusive perfis novos. Só para quem já
+   * tem a conta travada ou não corre com outra requisição: a anonimização
+   * (depois de `buscarPorIdParaAtualizar`) e a concessão de perfis. A conta lida
+   * sem trava e gravada inteira desfaria uma mudança confirmada no meio; para a
+   * senha, a desativação e o último login, use as gravações de uma coluna
+   * abaixo (S95).
+   */
   abstract atualizar(conta: Conta): Promise<void>;
+  /**
+   * Grava só `ultimo_login_em` (login ou renovação; P1-dono, base do expurgo),
+   * e só se a conta ainda está ativa:
+   *
+   *     UPDATE identidade.contas SET ultimo_login_em = $2
+   *      WHERE id = $1 AND status = 'ativa'
+   *
+   * Devolve `true` se mudou a linha, e `false` se a conta não existe ou não está
+   * mais ativa. Nunca grava o resto da conta: a conta lida antes de uma exclusão
+   * confirmada no meio, gravada inteira, desfaria a desativação. Em READ
+   * COMMITTED, o UPDATE espera a exclusão em andamento e reavalia o `status` com
+   * o valor confirmado. Use no lugar de `Conta.registrarLogin` + `atualizar`.
+   */
+  abstract gravarUltimoLogin(id: string, quando: Date): Promise<boolean>;
+  /**
+   * Grava só `email_verificado_em` (código de verificação aceito), e só se a
+   * conta ainda está ativa, guardando a primeira data como
+   * `Conta.verificarEmail`:
+   *
+   *     UPDATE identidade.contas
+   *        SET email_verificado_em = coalesce(email_verificado_em, $2)
+   *      WHERE id = $1 AND status = 'ativa'
+   *
+   * Devolve `true` se a conta ativa existe (verificada agora ou antes) e
+   * `false` se não existe ou não está mais ativa. Mesma razão de
+   * `gravarUltimoLogin`: a conta inteira gravada a partir de uma leitura velha
+   * desfaria uma exclusão ou outra mudança confirmada no meio.
+   */
+  abstract gravarEmailVerificado(id: string, quando: Date): Promise<boolean>;
+  /**
+   * Grava a senha redefinida pelo código do e-mail (CA-06; P1-dono: o código
+   * prova o e-mail, que fica verificado, guardando a primeira data), só em
+   * conta ativa (S95):
+   *
+   *     UPDATE identidade.contas
+   *        SET senha_hash = $2, email_verificado_em = coalesce(email_verificado_em, $3)
+   *      WHERE id = $1 AND status = 'ativa'
+   *
+   * Devolve `true` se mudou a linha e `false` se a conta não existe ou não está
+   * mais ativa. Nada além dessas duas colunas muda.
+   */
+  abstract gravarSenhaRedefinida(id: string, senhaHash: string, quando: Date): Promise<boolean>;
+  /**
+   * Apaga a senha da conta ativa (CLI de reconfiguração do 2FA, S97): a conta
+   * só volta a entrar depois de redefinir a senha pelo e-mail.
+   *
+   *     UPDATE identidade.contas SET senha_hash = NULL
+   *      WHERE id = $1 AND status = 'ativa'
+   *
+   * Devolve `true` se mudou a linha e `false` se a conta não existe ou não está
+   * mais ativa.
+   */
+  abstract gravarSenhaRemovida(id: string): Promise<boolean>;
+  /**
+   * Desativa a conta pedida pela própria pessoa (CA-11), só se ainda está ativa
+   * (S95):
+   *
+   *     UPDATE identidade.contas SET status = 'desativada', desativada_em = $2
+   *      WHERE id = $1 AND status = 'ativa'
+   *
+   * Devolve `true` se mudou a linha e `false` se a conta não existe ou já saiu
+   * de `ativa`. Nada além dessas duas colunas muda.
+   */
+  abstract gravarDesativacao(id: string, quando: Date): Promise<boolean>;
   /**
    * Ids de contas que `Conta.deveSerExpurgada` apagaria: ativas, sem e-mail
    * verificado, sem perfil `admin` nem `lojista` e com o último login (ou, sem
@@ -183,12 +282,20 @@ export abstract class RepositorioDeBloqueios {
    */
   abstract buscar(chaveHmac: string, tipo: TipoDeBloqueio): Promise<BloqueioDeLogin | null>;
   /**
-   * O freio da chave, travado até o fim da unidade de trabalho (R1): o
-   * adaptador faz `INSERT ... ON CONFLICT DO NOTHING` com o freio zerado
-   * (`BloqueioDeLogin.novo(chaveHmac, tipo, agora)`) e depois `SELECT ... FOR
-   * UPDATE`, então a chave sem falha também tem linha a travar e duas falhas
-   * simultâneas viram duas. Chamado dentro da unidade de trabalho; quem chama
-   * grava com `salvar` (uma linha zerada que não for salva não freia ninguém).
+   * O freio da chave, travado até o fim da unidade de trabalho (R1), num
+   * comando só:
+   *
+   *     INSERT INTO identidade.bloqueios_login (...) VALUES (<freio zerado>)
+   *     ON CONFLICT (chave_hmac, tipo) DO UPDATE SET chave_hmac = EXCLUDED.chave_hmac
+   *     RETURNING ...
+   *
+   * A chave sem falha também ganha linha a travar (`BloqueioDeLogin.novo(chaveHmac,
+   * tipo, agora)`), e duas falhas simultâneas viram duas: a segunda espera a
+   * primeira e lê o que ela gravou. Sempre devolve uma linha, inclusive quando
+   * a primeira apagou o freio zerado enquanto a segunda esperava (A-R1, S96):
+   * o comando então insere de novo, em vez de achar zero linhas. Chamado dentro
+   * da unidade de trabalho; quem chama grava com `salvar` (uma linha zerada que
+   * não for salva não freia ninguém).
    */
   abstract buscarParaAtualizar(
     chaveHmac: string,
@@ -220,6 +327,12 @@ export interface Consentimento {
   readonly aceitoEm: Date;
 }
 
+/** Um aceite com o tipo e a versão do documento aceito (exportação dos dados, S10). */
+export interface ConsentimentoComDocumento extends Consentimento {
+  readonly tipo: TipoDeDocumentoLegal;
+  readonly versao: string;
+}
+
 export abstract class RepositorioDeDocumentosLegais {
   /** O documento do tipo com o maior `vigente_desde` até `agora`; `null` se não há. */
   abstract buscarVigente(tipo: TipoDeDocumentoLegal, agora: Date): Promise<DocumentoLegal | null>;
@@ -231,6 +344,12 @@ export abstract class RepositorioDeDocumentosLegais {
   abstract registrarConsentimento(consentimento: Consentimento): Promise<void>;
   /** Data do aceite do documento pela conta; `null` se não aceitou (CA-10). */
   abstract buscarAceite(contaId: string, documentoId: string): Promise<Date | null>;
+  /**
+   * Todos os aceites da conta, inclusive de versões que não estão mais em
+   * vigor, do mais antigo para o mais novo (`aceito_em`), para a exportação dos
+   * dados do titular. Vazio se a conta não aceitou nada.
+   */
+  abstract listarConsentimentos(contaId: string): Promise<readonly ConsentimentoComDocumento[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +414,14 @@ export abstract class RepositorioDeSolicitacoes {
     contaId: string,
     tipo: TipoDeSolicitacao,
   ): Promise<SolicitacaoDoTitular | null>;
+  /**
+   * Quantas solicitações da conta e do tipo foram feitas depois de `desde`
+   * (`solicitada_em > desde`), em qualquer status. Com a conta travada
+   * (`RepositorioDeContas.buscarPorIdParaAtualizar`), confere o limite de um
+   * pedido de exportação por 24 h contando também a solicitação que a própria
+   * unidade acabou de inserir.
+   */
+  abstract contarDesde(contaId: string, tipo: TipoDeSolicitacao, desde: Date): Promise<number>;
   /** Até `quantidade`, das mais antigas para as mais novas. */
   abstract listarPorStatus(
     tipo: TipoDeSolicitacao,
@@ -319,9 +446,28 @@ export abstract class RepositorioDeExportacoes {
   abstract inserir(exportacao: ExportacaoDoTitular): Promise<void>;
   /** A exportação mais recente não baixada e não vencida em `agora`; `null` se não há. */
   abstract buscarDisponivel(contaId: string, agora: Date): Promise<ExportacaoDoTitular | null>;
-  abstract marcarBaixada(id: string, agora: Date): Promise<void>;
+  /**
+   * Marca o download, só se ainda não foi baixada (uso único, S10):
+   *
+   *     UPDATE identidade.exportacoes_titular SET baixada_em = $2
+   *      WHERE id = $1 AND baixada_em IS NULL
+   *
+   * Devolve `true` para quem marcou e `false` se outra requisição baixou antes
+   * (ou a exportação não existe). Em READ COMMITTED, o segundo UPDATE espera o
+   * primeiro e reavalia `baixada_em IS NULL` com o valor confirmado: dois
+   * downloads simultâneos não recebem os dois o arquivo.
+   */
+  abstract marcarBaixada(id: string, agora: Date): Promise<boolean>;
   /** Apaga as vencidas e as já baixadas; devolve quantas. */
   abstract apagarVencidas(agora: Date): Promise<number>;
+  /**
+   * Apaga as exportações da conta ainda não baixadas, vencidas ou não, antes
+   * de gravar uma nova (S98): só a cópia mais recente pode ser baixada, e as
+   * anteriores não ficam guardadas à toa. Um download em andamento da cópia
+   * antiga espera e não a acha mais (`marcarBaixada` devolve `false`).
+   * Devolve quantas.
+   */
+  abstract apagarNaoBaixadas(contaId: string): Promise<number>;
   /** Apaga as exportações da conta (anonimização). */
   abstract apagarDaConta(contaId: string): Promise<void>;
 }

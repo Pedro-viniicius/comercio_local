@@ -34,13 +34,32 @@ import {
 // ---------------------------------------------------------------------------
 // Portas da Identidade
 
+/** O `Hasher` foi chamado com uma transação aberta (S91). */
+export class HashDentroDaTransacao extends Error {
+  constructor(operacao: string) {
+    super(
+      `Hasher.${operacao} chamado com a unidade de trabalho aberta: o Argon2id seguraria ` +
+        'a conexão e as travas durante o hash (S91).',
+    );
+    this.name = 'HashDentroDaTransacao';
+  }
+}
+
 /**
  * `Hasher` que não é Argon2: aplica NFKC como o adaptador e conta as
  * chamadas, para o teste conferir que o caminho do e-mail repetido e o da
- * conta inexistente também gastam um hash (CA-02, CA-04).
+ * conta inexistente também gastam um hash (CA-02, CA-04). Com a unidade de
+ * trabalho falsa, rejeita se for chamado com uma transação aberta (S91): o
+ * hash nunca segura conexão nem trava.
  */
 export class HasherFalso extends Hasher {
   readonly chamadas = { gerarHash: 0, verificar: 0, simularVerificacao: 0 };
+  readonly #unidade: { readonly emTransacao: boolean } | undefined;
+
+  constructor(unidade?: { readonly emTransacao: boolean }) {
+    super();
+    this.#unidade = unidade;
+  }
 
   static hashDe(senha: string): string {
     return `hash-falso:${Buffer.from(senha.normalize('NFKC')).toString('base64url')}`;
@@ -48,17 +67,24 @@ export class HasherFalso extends Hasher {
 
   override gerarHash(senha: string): Promise<string> {
     this.chamadas.gerarHash += 1;
-    return Promise.resolve(HasherFalso.hashDe(senha));
+    return this.#foraDaTransacao('gerarHash', () => HasherFalso.hashDe(senha));
   }
 
   override verificar(senha: string, hash: string): Promise<boolean> {
     this.chamadas.verificar += 1;
-    return Promise.resolve(HasherFalso.hashDe(senha) === hash);
+    return this.#foraDaTransacao('verificar', () => HasherFalso.hashDe(senha) === hash);
   }
 
   override simularVerificacao(_senha: string): Promise<void> {
     this.chamadas.simularVerificacao += 1;
-    return Promise.resolve();
+    return this.#foraDaTransacao('simularVerificacao', () => undefined);
+  }
+
+  #foraDaTransacao<T>(operacao: string, calcular: () => T): Promise<T> {
+    if (this.#unidade?.emTransacao === true) {
+      return Promise.reject(new HashDentroDaTransacao(operacao));
+    }
+    return Promise.resolve(calcular());
   }
 }
 

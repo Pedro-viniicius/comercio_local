@@ -297,6 +297,9 @@
 }
 
 .ui-banner__acao {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--espaco-2);
   margin-top: var(--espaco-2);
 }
 
@@ -333,6 +336,15 @@
 .ui-cartao-fundo > .ui-cartao {
   /* O fundo já tem o respiro nas laterais. */
   width: min(400px, 100%);
+}
+
+/* Cabeçalho do cartão (D4): logo à esquerda e, quando há, "Sair" no canto direito. */
+.ui-cartao__cabecalho {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espaco-3);
 }
 
 .ui-cartao__titulo {

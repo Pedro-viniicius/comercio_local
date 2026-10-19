@@ -17,3 +17,5 @@ Pontos recorrentes: mensagens de identidade nunca revelam se a conta existe (CA-
 
 **Why:** contexto para as próximas fatias (02 em diante) reutilizarem marca, tokens e padrões.
 **How to apply:** conferir se as perguntas em aberto das specs foram respondidas antes de assumir local de arquivos.
+
+Painel (atualizado 2026-10-19): componentes `ui-` em `apps/painel/src/componentes`, telas em `apps/painel/src/autenticacao` (CSS `autenticacao.css`), textos em `apps/painel/src/textos/pt-BR.ts`. `apps/painel/src/sessao/**` é regra de negócio (não editar, inclusive os testes). Região `role="status"` de carregamento: `RegiaoDeStatus.tsx` (monta vazia). Captura: demo temporária com `fetch` falso em `src/demo-temp.tsx` + `demo-temp.html` (apagar depois); a CSP e o `Date.now` acelerado não pegaram o aviso de 28 min, então o sticky foi conferido com HTML estático.

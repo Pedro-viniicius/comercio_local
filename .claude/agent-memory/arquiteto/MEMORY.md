@@ -1,4 +1,4 @@
-- [Arquitetura do MVP](project_arquitetura_mvp.md) — stack aprovada, padrões de segurança, poison pill, trilhas do 01b, NFKC/eventos/2FA, lista de senhas só na API, 401 só da guarda
+- [Arquitetura do MVP](project_arquitetura_mvp.md) — stack aprovada, padrões de segurança, poison pill, trilhas do 01b, NFKC/eventos/2FA, lista de senhas só na API, 401 só da guarda (e exceções), Argon2 fora da transação
 - [Escrita só com Edit](feedback_escrita_so_com_edit.md) — plano e memória só por Edit/Write, nunca sed -i ou script pelo Bash
 - [Fontes de gateways](reference_fontes_gateways.md) — URLs oficiais por critério e o que não foi confirmado
 - [Fontes de lojas e CI](reference_fontes_lojas.md) — preços e regras de EAS, Actions, Apple e Play, conferidos em 2026-10-16

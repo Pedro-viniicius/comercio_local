@@ -76,3 +76,66 @@ describe('gravarRotacao não desfaz uma revogação confirmada no meio (S8, S77)
     },
   );
 });
+
+describe('revogação espera a rotação aberta terminar (R11)', () => {
+  // Uma rotação aberta trava a linha (UPDATE condicionado). No Postgres, a revogação
+  // concorrente espera a rotação confirmar ou desfazer. Sem a trava no fake, a revogação
+  // gravava por cima da rotação ainda aberta, e o rollback da rotação a apagava.
+  it.each([
+    'revogarDaFamilia',
+    'revogarDaConta',
+    'atualizar',
+    'atualizar fora da unidade',
+  ] as const)(
+    '%s durante uma rotação que depois falha: a sessão fica revogada',
+    async (operacao) => {
+      const identidade = await comSessao();
+      let avisarQueTravou: () => void = () => undefined;
+      const travou = new Promise<void>((resolver) => {
+        avisarQueTravou = resolver;
+      });
+      let liberarRotacao: () => void = () => undefined;
+      const liberada = new Promise<void>((resolver) => {
+        liberarRotacao = resolver;
+      });
+
+      const rotacao = identidade.unidade.executar(async () => {
+        const lida = await identidade.sessoes.buscarPorTokenHash('t1');
+        if (lida === null) throw new Error('sessão não encontrada');
+        lida.rotacionar('t2', 'par-t2', depois(1_000));
+        expect(await identidade.sessoes.gravarRotacao(lida)).toBe(true);
+        avisarQueTravou();
+        await liberada;
+        throw new Error('falha depois de rotacionar');
+      });
+      await travou;
+
+      const revogar = async () => {
+        if (operacao === 'revogarDaFamilia') {
+          await identidade.sessoes.revogarDaFamilia(SID, 'reuso_detectado', depois(500));
+        } else if (operacao === 'revogarDaConta') {
+          await identidade.sessoes.revogarDaConta(CONTA, 'reuso_detectado', depois(500));
+        } else {
+          const sessao = await identidade.sessoes.buscarPorId(SID);
+          if (sessao === null) throw new Error('sessão não encontrada');
+          sessao.revogar('reuso_detectado', depois(500));
+          await identidade.sessoes.atualizar(sessao);
+        }
+      };
+      const revogacao =
+        operacao === 'atualizar fora da unidade' ? revogar() : identidade.unidade.executar(revogar);
+      await new Promise<void>((resolver) => setImmediate(resolver));
+
+      liberarRotacao();
+      await expect(rotacao).rejects.toThrow('falha depois de rotacionar');
+      await revogacao;
+
+      expect(identidade.sessoes.dadosDe(SID)).toMatchObject({
+        tokenHash: 't1',
+        revogadaEm: depois(500),
+        motivoRevogacao: 'reuso_detectado',
+      });
+      expect(identidade.sessoes.tokensUsados()).toEqual([]);
+    },
+  );
+});

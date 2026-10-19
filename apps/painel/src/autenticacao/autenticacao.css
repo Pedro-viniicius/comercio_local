@@ -1,0 +1,149 @@
+/*
+ * Telas de autenticação do painel (spec 01, P1 a P1c) e a área protegida mínima. Só variáveis de
+ * `tokens.css.ts`, como `componentes.css`; classes com o prefixo `aut-`. Servido como arquivo
+ * `.css` (sem `style=""`), para a CSP não precisar de `unsafe-inline`.
+ */
+.aut-logo {
+  display: block;
+  height: auto;
+}
+
+.aut-formulario {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-4);
+}
+
+.aut-texto {
+  margin: 0;
+  color: var(--cor-text-secondary);
+}
+
+.aut-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--espaco-1);
+  /* D9: o texto dos botões terciários alinha com a borda do conteúdo (compensa o padding deles). */
+  margin-inline-start: calc(-1 * var(--espaco-2));
+}
+
+.aut-carregando {
+  margin: 0;
+  color: var(--cor-text-secondary);
+}
+
+/* Campo de código: um campo só, com os 6 algarismos largos e alinhados (spec 01, "Componentes"). */
+.aut-campo-codigo .ui-campo__entrada {
+  font-size: var(--fonte-title-tamanho);
+  line-height: var(--fonte-title-altura-linha);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3em;
+}
+
+/* QR code de 200 px, escuro sobre a superfície clara, com a margem desenhada no próprio SVG. */
+.aut-qr {
+  display: block;
+  width: 200px;
+  height: 200px;
+  margin-inline: auto;
+}
+
+.aut-qr__fundo {
+  fill: var(--cor-bg-surface);
+}
+
+.aut-qr__modulos {
+  fill: var(--cor-text-primary);
+}
+
+.aut-chave,
+.aut-codigos {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  background: var(--cor-bg-subtle);
+  border-radius: var(--raio-md);
+}
+
+.aut-chave {
+  margin: 0;
+  padding: var(--espaco-3);
+  font-size: var(--fonte-title-sm-tamanho);
+  line-height: var(--fonte-title-sm-altura-linha);
+  overflow-wrap: anywhere;
+  word-spacing: 0.4em;
+}
+
+/* Lista de códigos de recuperação (D3): 2 colunas × 5 quando cabem; senão 1 coluna. Cada código
+   fica inteiro numa linha (nowrap), também em 320 px e com o texto a 200%. */
+.aut-codigos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13ch, 1fr));
+  gap: var(--espaco-2) var(--espaco-4);
+  margin: 0;
+  padding: var(--espaco-4);
+  list-style: none;
+}
+
+.aut-codigos li {
+  white-space: nowrap;
+}
+
+.aut-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--espaco-2);
+}
+
+/* Caixa de seleção: 24 px, alvo do tamanho mínimo do painel. */
+.aut-caixa {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-2);
+  min-height: var(--tamanho-alvo-web);
+  cursor: pointer;
+}
+
+.aut-caixa input {
+  flex: none;
+  width: var(--espaco-6);
+  height: var(--espaco-6);
+  margin: 0;
+  accent-color: var(--cor-action-primary);
+}
+
+.aut-caixa input:focus-visible {
+  outline: 2px solid var(--cor-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Área protegida mínima: barra com o logo e "Sair", conteúdo abaixo. */
+.aut-area {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--cor-bg-canvas);
+}
+
+.aut-barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espaco-3);
+  padding: var(--espaco-3) var(--espaco-6);
+  background: var(--cor-bg-surface);
+  border-bottom: 1px solid var(--cor-border-subtle);
+}
+
+/* R4: o aviso de fim de sessão acompanha a rolagem; numa página longa não fica fora da tela. */
+.aut-aviso-fixo {
+  position: sticky;
+  top: var(--espaco-2);
+  z-index: 1;
+  box-shadow: var(--elevacao-1);
+  border-radius: var(--raio-md);
+}
+
+@media (max-width: 431px) {
+  .aut-barra {
+    padding-inline: var(--espaco-4);
+  }
+}

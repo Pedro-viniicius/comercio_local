@@ -95,6 +95,7 @@ function montar(entrada: {
     armazenamento,
     revogacaoPendente,
     modoDeRenovacao: entrada.modo ?? 'token',
+    clienteDoApp: 'app_consumidor',
     aoEncerrarSessao: (motivo) => encerramentos.push(motivo),
     aoFalharEmSegundoPlano: (falha) => falhas.push(falha),
   });
@@ -135,7 +136,7 @@ describe('pendência de uma conta e sessão de outra (S80, S11)', () => {
       expect(pedido.headers['Authorization']).toBe(`Bearer ${sessaoN(1).tokenAcesso}`);
     }
     expect(para(URL_DA_RENOVACAO).map((c) => c.pedido.body)).toEqual([
-      JSON.stringify({ tokenRenovacao: sessaoN(1).tokenRenovacao }),
+      JSON.stringify({ tokenRenovacao: sessaoN(1).tokenRenovacao, cliente: 'app_consumidor' }),
     ]);
     // A sessão de B segue no aparelho e ninguém avisou encerramento.
     expect(sessaoGuardada()).toEqual(sessaoN(2));

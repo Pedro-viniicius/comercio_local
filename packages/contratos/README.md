@@ -4,19 +4,19 @@ Esquemas zod compartilhados por API, apps e painel. É a fonte única do formato
 
 ## O que exporta
 
-| Export                                                                 | Para quê                                                                                                                  |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `z`                                                                    | O zod 4 já configurado com o locale `ptBR`. **Importe `z` daqui, nunca de `zod`.**                                        |
-| `objetoEstrito(forma)`                                                 | Objeto que recusa campo desconhecido. Use em todo corpo e consulta HTTP.                                                  |
-| `problemaSchema`, `Problema`, `criarProblema`, `ERROS`, `CodigoDeErro` | Problem Details (RFC 9457) e os códigos de erro da API (no 01b, `sem_acesso_painel` 403 e `exclusao_com_pendencias` 409). |
-| `campoComErroSchema`, `CODIGOS_DE_CAMPO`, `camposDoErroZod`            | Erro de campo `{campo, codigo, motivo}` e a conversão de um erro do zod.                                                  |
-| `campoDoProblemaSchema`, `CampoDoProblema`                             | Erro de campo como o cliente o lê, com `codigo` em texto livre.                                                           |
-| `TIPO_DE_CONTEUDO_PROBLEMA`                                            | `application/problem+json`.                                                                                               |
-| `formaDaPaginacao`, `consultaPaginadaSchema`, `paginaSchema`, `Pagina` | Paginação por cursor, com `limite` de no máximo 20.                                                                       |
-| `saudeSchema`, `prontidaoSchema`                                       | Contratos de `GET /v1/saude` e `GET /v1/saude/pronto`.                                                                    |
-| Esquemas de `src/identidade/`                                          | Contratos das rotas de conta, sessão, senha, 2FA e privacidade (ver abaixo).                                              |
-| `EVENTOS_DE_IDENTIDADE`                                                | Eventos v1 da Identidade: `tipo`, `versao` e esquema estrito do payload (só ids).                                         |
-| Validadores (também em `@bairrin/contratos/validadores`)               | Funções puras de nome, e-mail, celular, senha e código e as constantes da Identidade (ver abaixo).                        |
+| Export                                                                 | Para quê                                                                                                                                                            |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `z`                                                                    | O zod 4 já configurado com o locale `ptBR` e, no navegador, sem JIT (`jitless`, S87: a CSP do painel não tem `unsafe-eval`). **Importe `z` daqui, nunca de `zod`.** |
+| `objetoEstrito(forma)`                                                 | Objeto que recusa campo desconhecido. Use em todo corpo e consulta HTTP.                                                                                            |
+| `problemaSchema`, `Problema`, `criarProblema`, `ERROS`, `CodigoDeErro` | Problem Details (RFC 9457) e os códigos de erro da API (no 01b, `sem_acesso_painel` 403 e `exclusao_com_pendencias` 409).                                           |
+| `campoComErroSchema`, `CODIGOS_DE_CAMPO`, `camposDoErroZod`            | Erro de campo `{campo, codigo, motivo}` e a conversão de um erro do zod.                                                                                            |
+| `campoDoProblemaSchema`, `CampoDoProblema`                             | Erro de campo como o cliente o lê, com `codigo` em texto livre.                                                                                                     |
+| `TIPO_DE_CONTEUDO_PROBLEMA`                                            | `application/problem+json`.                                                                                                                                         |
+| `formaDaPaginacao`, `consultaPaginadaSchema`, `paginaSchema`, `Pagina` | Paginação por cursor, com `limite` de no máximo 20.                                                                                                                 |
+| `saudeSchema`, `prontidaoSchema`                                       | Contratos de `GET /v1/saude` e `GET /v1/saude/pronto`.                                                                                                              |
+| Esquemas de `src/identidade/`                                          | Contratos das rotas de conta, sessão, senha, 2FA e privacidade (ver abaixo).                                                                                        |
+| `EVENTOS_DE_IDENTIDADE`                                                | Eventos v1 da Identidade: `tipo`, `versao` e esquema estrito do payload (só ids).                                                                                   |
+| Validadores (também em `@bairrin/contratos/validadores`)               | Funções puras de nome, e-mail, celular, senha e código e as constantes da Identidade (ver abaixo).                                                                  |
 
 ## Regras de uso
 

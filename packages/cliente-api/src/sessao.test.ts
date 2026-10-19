@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { z, type Sessao } from '@bairrin/contratos';
+import { renovarSessaoSchema, z, type Sessao } from '@bairrin/contratos';
 import {
   CAMINHO_DA_RENOVACAO,
   CAMINHO_DO_LOGOUT,
@@ -11,6 +11,7 @@ import {
   MAXIMO_DE_REVOGACOES_PENDENTES,
   type ArmazenamentoDeRevogacao,
   type ArmazenamentoDeSessao,
+  type ClienteApi,
   type CredencialPendente,
   type FalhaEmSegundoPlano,
   type FetchInjetavel,
@@ -172,6 +173,7 @@ function montar(entrada: {
     armazenamento: guarda.armazenamento,
     revogacaoPendente: revogacao.armazenamento,
     modoDeRenovacao: entrada.modo ?? 'token',
+    clienteDoApp: 'app_consumidor',
     aoEncerrarSessao: (motivo) => encerramentos.push(motivo),
     aoFalharEmSegundoPlano: (falha) => falhas.push(falha),
     ...entrada.ajustes,
@@ -271,6 +273,7 @@ describe('Bearer', () => {
       },
       revogacaoPendente: revogacaoFalsa().armazenamento,
       modoDeRenovacao: 'token',
+      clienteDoApp: 'app_consumidor',
     });
     const pedirConta = () => autenticado.requisitar({ caminho: '/v1/conta', esquema: contaSchema });
 
@@ -309,7 +312,7 @@ describe('renovação em 401', () => {
     expect(renovacoes).toHaveLength(1);
     expect(renovacoes[0]?.pedido.method).toBe('POST');
     expect(renovacoes[0]?.pedido.body).toBe(
-      JSON.stringify({ tokenRenovacao: SESSAO_1.tokenRenovacao }),
+      JSON.stringify({ tokenRenovacao: SESSAO_1.tokenRenovacao, cliente: 'app_consumidor' }),
     );
     expect(renovacoes[0]?.pedido.headers['Authorization']).toBeUndefined();
     const contas = para(URL_DA_CONTA);
@@ -723,6 +726,7 @@ describe('encerrarSessao (logout)', () => {
       },
       revogacaoPendente: revogacaoFalsa().armazenamento,
       modoDeRenovacao: 'token',
+      clienteDoApp: 'app_consumidor',
       aoEncerrarSessao: (motivo) => encerramentos.push(motivo),
     });
 
@@ -829,6 +833,7 @@ describe('troca de sessão durante a renovação', () => {
       armazenamento,
       revogacaoPendente: revogacaoFalsa().armazenamento,
       modoDeRenovacao: 'token',
+      clienteDoApp: 'app_consumidor',
     });
 
     const inicio = autenticado.iniciarSessao(SESSAO_1);
@@ -1109,7 +1114,8 @@ describe('revogação pendente nos apps (S80)', () => {
     const { pedirConta, para, revogacao } = montar({
       atendimento: (url, pedido) => {
         if (url === URL_DA_RENOVACAO) {
-          return pedido.body === JSON.stringify({ tokenRenovacao: SESSAO_1.tokenRenovacao })
+          return pedido.body ===
+            JSON.stringify({ tokenRenovacao: SESSAO_1.tokenRenovacao, cliente: 'app_consumidor' })
             ? json(200, SESSAO_2)
             : nao401();
         }
@@ -1512,5 +1518,223 @@ describe('falhas que não trocam o resultado da requisição (Q18)', () => {
     await expect(autenticado.encerrarSessao()).resolves.toEqual({ revogadaNoServidor: true });
     expect(falhas.map((f) => f.origem)).toEqual(['aviso_de_encerramento']);
     expect(guardado()).toBeNull();
+  });
+});
+
+describe('cliente do app no corpo da renovação (S16, etapa 5c)', () => {
+  const PAR_1 = { tokenAcesso: SESSAO_1.tokenAcesso, tokenRenovacao: SESSAO_1.tokenRenovacao };
+
+  /**
+   * API com o contrato da renovação: corpo fora de `renovarSessaoSchema` dá
+   * 400, como a API faz com o `cliente` ausente; o token de renovação da
+   * SESSAO_1 rende a SESSAO_2. Conta e logout só com o acesso da SESSAO_2.
+   */
+  function apiComContrato(corpos: unknown[]): Atendimento {
+    return (url, pedido) => {
+      if (url === URL_DA_RENOVACAO) {
+        const corpo: unknown = JSON.parse(pedido.body ?? 'null');
+        corpos.push(corpo);
+        const lido = renovarSessaoSchema.safeParse(corpo);
+        if (!lido.success) return json(400, { ...PROBLEMA_401, status: 400, codigo: 'invalido' });
+        return lido.data.tokenRenovacao === SESSAO_1.tokenRenovacao
+          ? json(200, SESSAO_2)
+          : nao401();
+      }
+      const autorizado = pedido.headers['Authorization'] === `Bearer ${SESSAO_2.tokenAcesso}`;
+      if (url === URL_DO_LOGOUT) return autorizado ? resposta(204, '') : nao401();
+      return autorizado ? json(200, { nome: 'Conta' }) : nao401();
+    };
+  }
+
+  it.each(['app_consumidor', 'app_lojista'] as const)(
+    'a renovação em 401 manda o cliente configurado (%s)',
+    async (clienteDoApp) => {
+      const corpos: unknown[] = [];
+      const { pedirConta, encerramentos } = montar({
+        atendimento: apiComContrato(corpos),
+        inicial: SESSAO_1,
+        ajustes: { clienteDoApp },
+      });
+
+      await expect(pedirConta()).resolves.toEqual({ nome: 'Conta' });
+
+      expect(corpos).toEqual([{ tokenRenovacao: SESSAO_1.tokenRenovacao, cliente: clienteDoApp }]);
+      expect(encerramentos).toEqual([]);
+    },
+  );
+
+  it('renovarSessao e o logout com o acesso vencido também mandam o cliente', async () => {
+    const corpos: unknown[] = [];
+    const { autenticado } = montar({
+      atendimento: apiComContrato(corpos),
+      inicial: SESSAO_1,
+      ajustes: { clienteDoApp: 'app_lojista' },
+    });
+    await expect(autenticado.renovarSessao()).resolves.toEqual(SESSAO_2);
+
+    const logout = montar({
+      atendimento: apiComContrato(corpos),
+      inicial: SESSAO_1,
+      ajustes: { clienteDoApp: 'app_lojista' },
+    });
+    await expect(logout.autenticado.encerrarSessao()).resolves.toEqual({
+      revogadaNoServidor: true,
+    });
+
+    const esperado = { tokenRenovacao: SESSAO_1.tokenRenovacao, cliente: 'app_lojista' };
+    expect(corpos).toEqual([esperado, esperado]);
+    expect(logout.para(URL_DO_LOGOUT).map((c) => c.pedido.headers['Authorization'])).toEqual([
+      `Bearer ${SESSAO_1.tokenAcesso}`,
+      `Bearer ${SESSAO_2.tokenAcesso}`,
+    ]);
+  });
+
+  // Sem o `cliente`, o 400 do contrato contaria como "revogada" e a pendência
+  // sairia com a sessão ainda viva no servidor.
+  it('a renovação da revogação pendente manda o cliente, e a pendência só sai com o DELETE confirmado', async () => {
+    const corpos: unknown[] = [];
+    const { pedirConta, para, revogacao, falhas } = montar({
+      atendimento: apiComContrato(corpos),
+      pendente: PAR_1,
+      ajustes: { clienteDoApp: 'app_lojista' },
+    });
+
+    await pedirConta().catch(() => undefined);
+    await vi.waitFor(() => expect(revogacao.guardada()).toBeNull());
+
+    expect(corpos).toEqual([{ tokenRenovacao: SESSAO_1.tokenRenovacao, cliente: 'app_lojista' }]);
+    expect(para(URL_DO_LOGOUT).map((c) => c.pedido.headers['Authorization'])).toEqual([
+      `Bearer ${SESSAO_1.tokenAcesso}`,
+      `Bearer ${SESSAO_2.tokenAcesso}`,
+    ]);
+    expect(falhas).toEqual([]);
+  });
+
+  it('nos apps, sem clienteDoApp válido, criarClienteAutenticado lança antes de tocar no armazenamento', () => {
+    const guarda = armazenamentoFalso(SESSAO_1);
+    const revogacao = revogacaoFalsa(PAR_1);
+    const base = {
+      cliente: criarClienteApi({ baseUrl: BASE, fetch: fetchFalso(nao401).fetch }),
+      armazenamento: guarda.armazenamento,
+      revogacaoPendente: revogacao.armazenamento,
+      modoDeRenovacao: 'token',
+    };
+    for (const clienteDoApp of [undefined, 'painel', 'admin', '']) {
+      const opcoes = { ...base, clienteDoApp } as unknown as OpcoesDoClienteAutenticado;
+      expect(() => criarClienteAutenticado(opcoes), String(clienteDoApp)).toThrow(TypeError);
+    }
+    expect(guarda.operacoes).toEqual([]);
+    expect(revogacao.operacoes).toEqual([]);
+  });
+
+  it('no painel, clienteDoApp não é exigido e a renovação vai sem corpo', async () => {
+    const api = fetchFalso(
+      apiComToken(
+        () => SESSAO_2.tokenAcesso,
+        () => json(200, { ...SESSAO_2, tokenRenovacao: undefined }),
+      ),
+    );
+    const autenticado = criarClienteAutenticado({
+      cliente: criarClienteApi({ baseUrl: BASE, fetch: api.fetch }),
+      armazenamento: armazenamentoFalso().armazenamento,
+      revogacaoPendente: revogacaoFalsa().armazenamento,
+      modoDeRenovacao: 'cookie',
+    });
+
+    await expect(autenticado.renovarSessao()).resolves.toMatchObject({
+      tokenAcesso: SESSAO_2.tokenAcesso,
+    });
+    expect(api.para(URL_DA_RENOVACAO)[0]?.pedido.body).toBeUndefined();
+  });
+});
+
+describe('renovarEm401: false (S9, polling)', () => {
+  it.each(['token', 'cookie'] as const)(
+    'modo %s: o 401 volta direto, sem renovar, repetir nem encerrar; a próxima chamada comum renova',
+    async (modo) => {
+      const { autenticado, pedirConta, para, operacoes, guardado, encerramentos } = montar({
+        atendimento: apiComToken(
+          () => SESSAO_2.tokenAcesso,
+          () => json(200, SESSAO_2),
+        ),
+        inicial: SESSAO_1,
+        modo,
+      });
+
+      const erro = await autenticado
+        .requisitar({ caminho: '/v1/conta', esquema: contaSchema, renovarEm401: false })
+        .catch((e: unknown) => e);
+
+      expect(erro).toBeInstanceOf(ErroDeApi);
+      expect((erro as ErroDeApi).status).toBe(401);
+      expect(para(URL_DA_RENOVACAO)).toHaveLength(0);
+      expect(para(URL_DA_CONTA)).toHaveLength(1);
+      expect(encerramentos).toEqual([]);
+      expect(operacoes).toEqual(['ler']);
+      await expect(autenticado.obterSessao()).resolves.toMatchObject({
+        tokenAcesso: SESSAO_1.tokenAcesso,
+      });
+
+      await expect(pedirConta()).resolves.toEqual({ nome: 'Conta' });
+      expect(para(URL_DA_RENOVACAO)).toHaveLength(1);
+      expect(guardado()).toMatchObject({ tokenAcesso: SESSAO_2.tokenAcesso });
+    },
+  );
+
+  it('renovarEm401: true (ou ausente) mantém a renovação em 401', async () => {
+    const { autenticado, para } = montar({
+      atendimento: apiComToken(
+        () => SESSAO_2.tokenAcesso,
+        () => json(200, SESSAO_2),
+      ),
+      inicial: SESSAO_1,
+    });
+
+    await expect(
+      autenticado.requisitar({ caminho: '/v1/conta', esquema: contaSchema, renovarEm401: true }),
+    ).resolves.toEqual({ nome: 'Conta' });
+    expect(para(URL_DA_RENOVACAO)).toHaveLength(1);
+  });
+
+  it('com sucesso, vai com o Bearer; a opção nunca chega ao cliente base', async () => {
+    const api = fetchFalso((_url, pedido) =>
+      pedido.headers['Authorization'] === `Bearer ${SESSAO_1.tokenAcesso}`
+        ? json(200, { nome: 'Conta' })
+        : nao401(),
+    );
+    const base = criarClienteApi({ baseUrl: BASE, fetch: api.fetch });
+    const recebidas: object[] = [];
+    const espiao: ClienteApi = {
+      ...base,
+      requisitar: (opcoes) => {
+        recebidas.push(opcoes);
+        return base.requisitar(opcoes);
+      },
+    };
+    const comSessao = montar({
+      atendimento: nao401,
+      inicial: SESSAO_1,
+      ajustes: { cliente: espiao },
+    });
+    const semSessao = montar({ atendimento: nao401, ajustes: { cliente: espiao } });
+
+    await expect(
+      comSessao.autenticado.requisitar({
+        caminho: '/v1/conta',
+        esquema: contaSchema,
+        renovarEm401: false,
+      }),
+    ).resolves.toEqual({ nome: 'Conta' });
+    await expect(
+      semSessao.autenticado.requisitar({
+        caminho: '/v1/conta',
+        esquema: contaSchema,
+        renovarEm401: false,
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+
+    expect(recebidas).toHaveLength(2);
+    for (const opcoes of recebidas) expect(opcoes).not.toHaveProperty('renovarEm401');
+    expect(api.chamadas[0]?.pedido.headers['Authorization']).toBe(`Bearer ${SESSAO_1.tokenAcesso}`);
   });
 });

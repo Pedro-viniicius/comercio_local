@@ -13,6 +13,7 @@
     "test:integracao": "vitest run --config vitest.integracao.config.ts",
     "seed": "pnpm run build && node --env-file-if-exists=.env --enable-source-maps dist/cli/seed.js",
     "seed:admin": "pnpm run build && node --env-file-if-exists=.env --enable-source-maps dist/cli/seed-admin.js",
+    "reconfigurar-segundo-fator": "pnpm run build && node --env-file-if-exists=.env --enable-source-maps dist/cli/reconfigurar-segundo-fator.js",
     "prisma": "prisma",
     "migrar": "prisma migrate deploy && node dist/cli/migrar-pg-boss.js"
   },

@@ -19,6 +19,13 @@
 // falha abre uma nova (a coluna é NOT NULL e guarda a última). Falha durante a espera não conta: quem chama nem
 // confere a senha enquanto o freio está ativo, e responde com a mesma
 // mensagem da senha errada (CA-04).
+//
+// Reserva da tentativa (S91): o login e a exclusão registram a falha antes de
+// conferir a senha (`registrarFalha`), numa transação curta, e conferem a
+// senha fora dela. No sucesso, outra transação curta zera o freio de e-mail
+// (`registrarSucesso`) e devolve a falha reservada ao de origem
+// (`estornarFalha`). Assim nenhuma tentativa confere a senha depois do limiar,
+// e o Argon2 não segura conexão nem trava.
 
 export type TipoDeBloqueio = 'email' | 'ip' | 'segundo_fator';
 
@@ -142,6 +149,24 @@ export class BloqueioDeLogin {
     const espera = ESPERAS_EM_MS[this.#nivel - 1] ?? 0;
     this.#bloqueadoAte = new Date(instante + espera);
     this.#falhas = 0;
+  }
+
+  /**
+   * Desfaz a falha que `registrarFalha(registradaEm)` reservou para uma
+   * tentativa que depois deu certo (S91). O login e a exclusão contam a falha
+   * antes de conferir a senha, numa transação curta, e conferem a senha fora
+   * dela, sem conexão aberta; só no sucesso a falha reservada sai. É o que o
+   * freio de origem faz no sucesso, porque não zera (`registrarSucesso`).
+   *
+   * Tira uma falha só se a janela atual ainda é a da reserva (`janelaInicio`
+   * até `registradaEm`) e há falha contada. Se a janela recomeçou depois da
+   * reserva, a falha dela já não conta e nada muda. Se a reserva (ou outra
+   * falha) acionou a espera, as falhas zeraram e a espera fica: falha fechada.
+   */
+  estornarFalha(registradaEm: Date): void {
+    if (this.#falhas === 0) return;
+    if (registradaEm.getTime() < this.#janelaInicio.getTime()) return;
+    this.#falhas -= 1;
   }
 
   /**

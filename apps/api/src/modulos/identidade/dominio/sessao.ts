@@ -90,6 +90,14 @@ export interface NovaSessao {
   agora: Date;
   /** Família de uma sessão anterior que esta substitui; sem ela, a família é a própria sessão. */
   familiaId?: string;
+  /**
+   * Teto (`expira_absoluto_em`) da sessão do painel que esta substitui na mesma
+   * família, como na verificação de e-mail (S9, S101): a substituta nunca vive
+   * além das 12 h contadas do login. Fica o menor entre ele e as 12 h a partir
+   * de agora. `null` ou ausente: o teto conta de agora. Só no painel; nos apps,
+   * que não têm teto, um valor aqui é recusado.
+   */
+  tetoHerdado?: Date | null;
 }
 
 /** O que fazer com um token de renovação apresentado. */
@@ -173,9 +181,14 @@ export class Sessao {
 
   /** Sessão nova, depois da senha (apps) ou da senha + segundo fator (painel). */
   static criar(nova: NovaSessao): Sessao {
+    const herdado = nova.tetoHerdado ?? null;
+    if (herdado !== null && nova.cliente !== 'painel') {
+      throw new OperacaoInvalidaNaSessao('teto absoluto só existe em sessão do painel');
+    }
+    const tetoDeAgora = nova.agora.getTime() + DURACAO_MAXIMA_NO_PAINEL_EM_MS;
     const expiraAbsolutoEm =
       nova.cliente === 'painel'
-        ? new Date(nova.agora.getTime() + DURACAO_MAXIMA_NO_PAINEL_EM_MS)
+        ? new Date(Math.min(tetoDeAgora, herdado?.getTime() ?? tetoDeAgora))
         : null;
     return new Sessao({
       id: nova.id,
