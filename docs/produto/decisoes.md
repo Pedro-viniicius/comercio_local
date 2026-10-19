@@ -2,6 +2,23 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-18 — Decisão do dono: terceira rodada na etapa 5b (S85)
+- Contexto: na rodada 2 da etapa 5b, o `seguranca` deu BLOQUEANTE pelo S85 (ALTA). Uma senha de 128 caracteres feita com caracteres que se expandem na normalização NFKC, mais um trecho longo de símbolos, custava de 350 a 700 ms de CPU por requisição numa rota pública. O lead mediu 354 ms por chamada.
+- Decisão: uma terceira rodada na 5b só para o S85 (corrigir a complexidade da regra composta e limitar o trabalho pelo tamanho normalizado, com testes de tempo), conferida pelo `seguranca`. Entra no mesmo commit do grupo B.
+- Alternativa descartada: desligar a regra composta, o que reabriria parte do S74.
+- O dono escolheu a opção recomendada pelo lead.
+
+## 2026-10-18 — Decisão do dono: terceira rodada no grupo B do 01b
+- Contexto: depois de duas rodadas de revisão das etapas 3, 4, 5 e 12b, três revisores apontaram o mesmo defeito: R7 do `revisor` (CRÍTICO), resíduo do S77 do `seguranca` (MÉDIA) e Q20 do `qa` (médio). A gravação da rotação do token de renovação podia desfazer uma revogação confirmada no mesmo instante (redefinição de senha, logout ou reuso detectado).
+- Decisão: uma terceira rodada só para esse defeito, mais o Q21 (baixo, revogação pendente sobrescrita no `cliente-api`) e as referências do plano (R8, R9). `seguranca` e `revisor` conferem. Depois, commit e push do grupo B.
+- O dono escolheu a opção recomendada pelo lead.
+
+## 2026-10-17 — Decisão do dono: fontes da lista de senhas comuns (P11 do 01b)
+- Contexto: na etapa 5b, o `dev` constatou que nem todas as fontes do `@zxcvbn-ts/language-pt-br` são MIT. As palavras comuns (`commonWords`) vêm do OpenSubtitles, sob ODC-BY, que só exige atribuição. Os sobrenomes vêm do pt.wiktionary, sob CC BY-SA, que exige compartilhar pela mesma licença. A lista completa também aumentava o pacote do painel em cerca de 128 KB gzip. O `arquiteto` decidiu que a lista pública fica só na API e que o painel e os apps levam só a regra de forma e as listas escritas à mão.
+- Decisão: opção 1 da P11. Entram o SecLists (MIT), os nomes do IBGE e as palavras do OpenSubtitles (ODC-BY), com atribuição no cabeçalho do arquivo gerado e no README. Saem os sobrenomes do Wiktionary, e no lugar deles entram cerca de 100 sobrenomes do Censo 2022 do IBGE, escritos à mão.
+- Motivo: mantém a cobertura de palavras do português sem obrigar o código a sair sob CC BY-SA. Perde-se só a cauda longa de sobrenomes.
+- Ressalva: é leitura das licenças, não parecer jurídico. Os termos atuais do portal do IBGE não foram conferidos.
+
 ## 2026-10-17 — Decisão do dono: achados que sobraram da revisão do grupo A do 01b
 - Contexto: depois das duas rodadas de revisão do grupo A (etapas 1a, 2, 3a e 5a), o `seguranca` deu o veredito "corrigir antes do release". Sobraram dois achados MÉDIA, corrigidos só em parte: S70 (texto de erro com dado pessoal ainda chega ao log por `e.stack`, `child`/`assign`/`setBindings` e telefone ou CPF formatado) e S74 (a lista de senhas comuns escrita à mão é curta).
 - Decisão: o S70 é corrigido já, numa terceira rodada só dele, antes do commit do grupo A. O S71 (BAIXA, do mesmo arquivo do lint) entrou junto. O S74 vira a etapa 5b do plano 01b, no grupo B, obrigatória antes da etapa 6, que é a primeira a gravar senha. A 5b usa uma lista pública versionada como dado, com licença conferida, sem pacote novo.

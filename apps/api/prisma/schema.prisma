@@ -17,7 +17,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["compartilhado"]
+  schemas  = ["compartilhado", "identidade"]
 }
 
 /// Eventos de domínio gravados na mesma transação do caso de uso e publicados
@@ -79,4 +79,307 @@ model Configuracao {
   @@index([chave, vigenteDesde(sort: Desc)], map: "configuracoes_chave_vigente_idx")
   @@map("configuracoes")
   @@schema("compartilhado")
+}
+
+// ---------------------------------------------------------------------------
+// Identidade (plano 01b, etapa 3). Primeiro schema com dado pessoal: `contas`
+// (nome, e-mail e telefone) e os segredos cifrados ou com hash das outras
+// tabelas. Nada disso vai para log, erro, URL, auditoria ou evento (ADR-015).
+// RLS, políticas, GRANTs e as restrições CHECK ficam no SQL da migração.
+// ---------------------------------------------------------------------------
+
+enum StatusDaConta {
+  ativa
+  desativada
+  anonimizada
+
+  @@map("status_da_conta")
+  @@schema("identidade")
+}
+
+/// `admin` só por carga inicial (CLI), nunca por rota (CA-07).
+enum Perfil {
+  consumidor
+  lojista
+  admin
+
+  @@map("perfil")
+  @@schema("identidade")
+}
+
+/// Onde a sessão foi criada; só `painel` recebe `admin` e `mfa` (S1).
+enum ClienteDaSessao {
+  app_consumidor
+  app_lojista
+  painel
+
+  @@map("cliente_da_sessao")
+  @@schema("identidade")
+}
+
+/// Os desafios do 2FA guardam a etapa (S1).
+enum FinalidadeDoCodigo {
+  verificacao_email
+  recuperacao_senha
+  desafio_configurar
+  desafio_verificar
+
+  @@map("finalidade_do_codigo")
+  @@schema("identidade")
+}
+
+enum TipoDeDocumentoLegal {
+  termos
+  privacidade
+
+  @@map("tipo_de_documento_legal")
+  @@schema("identidade")
+}
+
+/// Freio do CA-04 por e-mail e por IP, e o de segundo fator por conta (S1, S14).
+enum TipoDeBloqueio {
+  email
+  ip
+  segundo_fator
+
+  @@map("tipo_de_bloqueio")
+  @@schema("identidade")
+}
+
+enum TipoDeSolicitacao {
+  exportacao
+  exclusao
+
+  @@map("tipo_de_solicitacao")
+  @@schema("identidade")
+}
+
+enum StatusDaSolicitacao {
+  pendente
+  aguardando_pendencias
+  concluida
+
+  @@map("status_da_solicitacao")
+  @@schema("identidade")
+}
+
+/// Conta única por e-mail. `emailNormalizado` é a saída de `normalizarEmail`
+/// (ASCII, minúsculas). `senhaHash` é nula na conta criada pelo `seed:admin`
+/// até a primeira redefinição e na anonimizada; `telefoneE164`, só na
+/// anonimizada. O login vale sem e-mail verificado (P1-dono). Só o expurgo
+/// apaga conta: a trigger `contas_so_expurgo` (no SQL da migração) recusa o
+/// resto (S78).
+model Conta {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome              String
+  emailNormalizado  String        @unique @map("email_normalizado")
+  telefoneE164      String?       @map("telefone_e164")
+  senhaHash         String?       @map("senha_hash")
+  emailVerificadoEm DateTime?     @map("email_verificado_em") @db.Timestamptz(6)
+  ultimoLoginEm     DateTime?     @map("ultimo_login_em") @db.Timestamptz(6)
+  status            StatusDaConta @default(ativa)
+  criadaEm          DateTime      @map("criada_em") @db.Timestamptz(6)
+  desativadaEm      DateTime?     @map("desativada_em") @db.Timestamptz(6)
+  anonimizadaEm     DateTime?     @map("anonimizada_em") @db.Timestamptz(6)
+
+  perfis             PerfilDaConta[]        @relation("PerfisDaConta")
+  perfisConcedidos   PerfilDaConta[]        @relation("PerfisConcedidosPor")
+  sessoes            Sessao[]
+  codigosVerificacao CodigoDeVerificacao[]
+  consentimentos     Consentimento[]
+  segundoFator       SegundoFator?
+  codigosRecuperacao CodigoDeRecuperacao[]
+  solicitacoes       SolicitacaoDoTitular[]
+  exportacoes        ExportacaoDoTitular[]
+
+  @@map("contas")
+  @@schema("identidade")
+}
+
+model PerfilDaConta {
+  contaId      String   @map("conta_id") @db.Uuid
+  perfil       Perfil
+  concedidoEm  DateTime @map("concedido_em") @db.Timestamptz(6)
+  concedidoPor String?  @map("concedido_por") @db.Uuid
+
+  conta             Conta  @relation("PerfisDaConta", fields: [contaId], references: [id], onDelete: Cascade)
+  concedidoPorConta Conta? @relation("PerfisConcedidosPor", fields: [concedidoPor], references: [id], onDelete: SetNull)
+
+  @@id([contaId, perfil])
+  @@map("perfis_conta")
+  @@schema("identidade")
+}
+
+/// Sessão (`sid` do JWT) com token de renovação opaco guardado só como hash.
+/// O par novo da tolerância de 60 s fica cifrado (S16). `mfa` só no painel.
+model Sessao {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contaId           String          @map("conta_id") @db.Uuid
+  familiaId         String          @map("familia_id") @db.Uuid
+  cliente           ClienteDaSessao
+  tokenHash         String          @unique @map("token_hash")
+  tokenAnteriorHash String?         @map("token_anterior_hash")
+  parNovoCifrado    String?         @map("par_novo_cifrado")
+  parNovoExpiraEm   DateTime?       @map("par_novo_expira_em") @db.Timestamptz(6)
+  trocadoEm         DateTime?       @map("trocado_em") @db.Timestamptz(6)
+  expiraEm          DateTime        @map("expira_em") @db.Timestamptz(6)
+  expiraAbsolutoEm  DateTime?       @map("expira_absoluto_em") @db.Timestamptz(6)
+  ultimoUsoEm       DateTime        @map("ultimo_uso_em") @db.Timestamptz(6)
+  mfa               Boolean         @default(false)
+  revogadaEm        DateTime?       @map("revogada_em") @db.Timestamptz(6)
+  motivoRevogacao   String?         @map("motivo_revogacao")
+  criadaEm          DateTime        @map("criada_em") @db.Timestamptz(6)
+
+  conta        Conta                   @relation(fields: [contaId], references: [id], onDelete: Cascade)
+  tokensUsados TokenDeRenovacaoUsado[]
+
+  @@index([contaId], map: "sessoes_conta_id_idx")
+  @@index([familiaId], map: "sessoes_familia_id_idx")
+  @@index([tokenAnteriorHash], map: "sessoes_token_anterior_hash_idx")
+  @@map("sessoes")
+  @@schema("identidade")
+}
+
+/// Todo token de renovação já trocado (só o HMAC), até a sessão sumir (S77): o
+/// reuso de um token antigo da família revoga a família inteira. Só leitura e
+/// inclusão para a aplicação.
+model TokenDeRenovacaoUsado {
+  tokenHash String   @id @map("token_hash")
+  familiaId String   @map("familia_id") @db.Uuid
+  sessaoId  String   @map("sessao_id") @db.Uuid
+  usadoEm   DateTime @map("usado_em") @db.Timestamptz(6)
+
+  sessao Sessao @relation(fields: [sessaoId], references: [id], onDelete: Cascade)
+
+  @@index([sessaoId], map: "tokens_de_renovacao_usados_sessao_id_idx")
+  @@map("tokens_de_renovacao_usados")
+  @@schema("identidade")
+}
+
+/// Código de 6 dígitos (e-mail e recuperação) ou desafio do 2FA, guardado como
+/// HMAC que cobre conta e finalidade (etapa 6). Nunca em claro.
+model CodigoDeVerificacao {
+  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contaId    String             @map("conta_id") @db.Uuid
+  finalidade FinalidadeDoCodigo
+  codigoHmac String             @map("codigo_hmac")
+  tentativas Int                @default(0)
+  expiraEm   DateTime           @map("expira_em") @db.Timestamptz(6)
+  usadoEm    DateTime?          @map("usado_em") @db.Timestamptz(6)
+  criadoEm   DateTime           @map("criado_em") @db.Timestamptz(6)
+
+  conta Conta @relation(fields: [contaId], references: [id], onDelete: Cascade)
+
+  @@index([contaId, finalidade], map: "codigos_verificacao_conta_finalidade_idx")
+  @@index([codigoHmac], map: "codigos_verificacao_codigo_hmac_idx")
+  @@map("codigos_verificacao")
+  @@schema("identidade")
+}
+
+/// Termos e política versionados: o vigente de cada tipo é o mais recente com
+/// `vigente_desde <= now()`. A aplicação só lê (S24, S79): versão nova entra
+/// por migração ou pelo seed de desenvolvimento, como `bairrin_migracao`.
+model DocumentoLegal {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipo         TipoDeDocumentoLegal
+  versao       String
+  conteudo     String
+  vigenteDesde DateTime             @map("vigente_desde") @db.Timestamptz(6)
+
+  consentimentos Consentimento[]
+
+  @@unique([tipo, versao], map: "documentos_legais_tipo_versao_key")
+  @@index([tipo, vigenteDesde(sort: Desc)], map: "documentos_legais_tipo_vigente_idx")
+  @@map("documentos_legais")
+  @@schema("identidade")
+}
+
+/// Aceite de uma versão de documento (CA-01, CA-10). Fica na anonimização, só
+/// com ids. A aplicação só lê e inclui.
+model Consentimento {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contaId     String   @map("conta_id") @db.Uuid
+  documentoId String   @map("documento_id") @db.Uuid
+  aceitoEm    DateTime @map("aceito_em") @db.Timestamptz(6)
+
+  conta     Conta          @relation(fields: [contaId], references: [id], onDelete: Cascade)
+  documento DocumentoLegal @relation(fields: [documentoId], references: [id])
+
+  @@unique([contaId, documentoId], map: "consentimentos_conta_documento_key")
+  @@map("consentimentos")
+  @@schema("identidade")
+}
+
+/// TOTP do admin: segredo cifrado (AES-GCM) e o último passo usado (sem reuso).
+model SegundoFator {
+  contaId          String    @id @map("conta_id") @db.Uuid
+  segredoCifrado   String    @map("segredo_cifrado")
+  confirmadoEm     DateTime? @map("confirmado_em") @db.Timestamptz(6)
+  ultimoPassoUsado Int?      @map("ultimo_passo_usado")
+
+  conta Conta @relation(fields: [contaId], references: [id], onDelete: Cascade)
+
+  @@map("segundo_fator")
+  @@schema("identidade")
+}
+
+/// Códigos de recuperação do 2FA, só como HMAC, de uso único.
+model CodigoDeRecuperacao {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contaId    String    @map("conta_id") @db.Uuid
+  codigoHmac String    @map("codigo_hmac")
+  usadoEm    DateTime? @map("usado_em") @db.Timestamptz(6)
+
+  conta Conta @relation(fields: [contaId], references: [id], onDelete: Cascade)
+
+  @@index([contaId], map: "codigos_recuperacao_conta_id_idx")
+  @@map("codigos_recuperacao")
+  @@schema("identidade")
+}
+
+/// Freio do CA-04: a chave é o HMAC do e-mail, do IP (/64 no IPv6) ou do id da
+/// conta (segundo fator), nunca o valor.
+model BloqueioDeLogin {
+  chaveHmac    String         @map("chave_hmac")
+  tipo         TipoDeBloqueio
+  falhas       Int            @default(0)
+  nivel        Int            @default(0)
+  janelaInicio DateTime       @map("janela_inicio") @db.Timestamptz(6)
+  bloqueadoAte DateTime?      @map("bloqueado_ate") @db.Timestamptz(6)
+
+  @@id([chaveHmac, tipo])
+  @@map("bloqueios_login")
+  @@schema("identidade")
+}
+
+/// Pedidos do titular (CA-10, CA-11).
+model SolicitacaoDoTitular {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contaId      String              @map("conta_id") @db.Uuid
+  tipo         TipoDeSolicitacao
+  status       StatusDaSolicitacao @default(pendente)
+  solicitadaEm DateTime            @map("solicitada_em") @db.Timestamptz(6)
+  concluidaEm  DateTime?           @map("concluida_em") @db.Timestamptz(6)
+
+  conta Conta @relation(fields: [contaId], references: [id], onDelete: Cascade)
+
+  @@index([contaId, tipo], map: "solicitacoes_titular_conta_tipo_idx")
+  @@map("solicitacoes_titular")
+  @@schema("identidade")
+}
+
+/// Cópia dos dados do titular, cifrada, baixada com sessão (7 dias, uso único, S10).
+model ExportacaoDoTitular {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contaId         String    @map("conta_id") @db.Uuid
+  conteudoCifrado String    @map("conteudo_cifrado")
+  criadaEm        DateTime  @map("criada_em") @db.Timestamptz(6)
+  expiraEm        DateTime  @map("expira_em") @db.Timestamptz(6)
+  baixadaEm       DateTime? @map("baixada_em") @db.Timestamptz(6)
+
+  conta Conta @relation(fields: [contaId], references: [id], onDelete: Cascade)
+
+  @@index([contaId], map: "exportacoes_titular_conta_id_idx")
+  @@map("exportacoes_titular")
+  @@schema("identidade")
 }

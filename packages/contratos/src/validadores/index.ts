@@ -8,5 +8,10 @@ export * from './email.ts';
 export * from './identidade.ts';
 export * from './nome.ts';
 export * from './senha.ts';
-export { ehSenhaComum, formaComparavelDaSenha } from './senhas-comuns.ts';
+export {
+  ehSenhaComum,
+  ehSenhaSoDeDigitosESimbolos,
+  formaComparavelDaSenha,
+  type ListaDeSenhasComuns,
+} from './senhas-comuns.ts';
 export * from './telefone.ts';

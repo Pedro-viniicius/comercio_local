@@ -1,2 +1,4 @@
 - [Como rodar testes](como-rodar-testes.md) — comandos isolados, sondas, cópia com código antigo, singleton do nestjs-pino, sonda no Postgres de teste
 - [Estado do verificador, logs e senhas (01b, grupo 0 e A)](verificador-migracoes-e-logs-lacunas.md) — Q5-Q16 e S33-S36, S70-S76 fechados; mutação; lacunas baixas
+- [Grupo B do 01b (migração, domínio, cliente-api, painel)](grupo-b-identidade-lacunas.md) — Q17-Q19 fechados; Q20 (média) e Q21 (baixa) abertos; testes e armadilhas
+- [Etapa 5b: lista de senhas e nome](etapa-5b-lista-senhas.md) — rodada 2: Q17-Q19 fechados, taxas de falso positivo, testes, mutação

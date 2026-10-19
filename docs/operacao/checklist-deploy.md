@@ -115,7 +115,7 @@ Vale para produção e homologação.
 
 - [ ] **(obrigatório, S21)** Só dados sintéticos. Nunca restaure um backup de produção em homologação, nem copie dados reais para testar.
 - [ ] Gateway no sandbox e contas de teste; nenhuma chave de produção.
-- [ ] Os seeds recusam `NODE_ENV=production` (a exceção é o `seed:admin`, por CLI). Futuro, plano 01b.
+- [ ] Os seeds recusam `NODE_ENV=production`: o `pnpm --filter api seed` só roda com `NODE_ENV` igual a `development` ou `test`. A exceção é o `seed:admin`, por CLI, que vem na etapa 13 do plano 01b.
 - [ ] Chaves e senhas diferentes das de produção.
 - [ ] Restauração de backup testada aqui antes do piloto (item 7).
 

@@ -6,9 +6,12 @@
 - [tsconfig sem DOM/Node](tsconfig-sem-dom.md) — como tipar fetch/AbortController/timers em pacotes compartilhados; lint de reject
 - [Painel: Vite, Vitest e tokens CSS](painel-vite-vitest.md) — CSS virtual vira arquivo, config lê tokens por runnerImport, Vitest esvazia .css, env.d.ts
 - [Imagem do painel: Caddy e Fly](painel-caddy-docker.md) — handle_errors p/ cabeçalhos, capability do binário, contexto do fly deploy, CSP no Chrome headless
-- [Prisma 7 e banco](prisma7-banco.md) — multiSchema, _prisma_migrations em `migracoes`, client gerado em src, `node --test` com glob
+- [Prisma 7 e banco](prisma7-banco.md) — multiSchema, `migracoes`, client em src, diff offline, enum sem USAGE, CASCADE como dono, spawn de cli .ts
 - [Verificador de migrações](verificador-migracoes.md) — visões alinhadas, $tag$ fecha no 1º delimitador, EXECUTE, brechas, ACL/dono no catálogo (P8 só de bairrin_migracao), sonda PG
 - [dependency-cruiser e fronteiras](depcruise-fronteiras.md) — exclude derruba npm, caminhos ../ nas fixtures, CLI no teste
 - [pg-boss, outbox e e-mail](pgboss-eventos-email.md) — pg-boss sem CREATE (CLI + GRANTs), output do job guarda erro, nodemailer 10, Mailpit, lint
 - [Docs: comandos verificados](docs-comandos-verificados.md) — Prisma CLI a partir de apps/api, cópia limpa real, node --run sem env-file, Prettier, EAS pago
 - [Deploy, TLS e Sentry](deploy-imagem-tls-sentry.md) — Sentry 11 sem sendDefaultPii, sessões/release do CI, env lido pelo SDK (Spotlight/debug/traces), Prisma verify-full, actionlint
+- [Cliente autenticado e fila única](cliente-api-sessao.md) — laço de microtarefas trava o Vitest, ??= com finally, promessa adiada sem rejeitar, mutação em lote
+- [Lista pública de senhas comuns](senhas-comuns-lista-publica.md) — fica só na API, licenças do zxcvbn pt-br, API de sobrenomes do IBGE, refine de corpo pulado, literal no .d.ts
+- [Domínio de Identidade](identidade-dominio.md) — CHECKs no domínio, fakes com ALS e travas, portas ParaAtualizar, trigger do expurgo, docs só pelo dono

@@ -1,0 +1,377 @@
+/*
+ * Componentes base do painel (Botão, Campo, Banner, Cartão, Indicador de passos). Só usa variáveis
+ * de `tokens.css.ts` (cor semântica, espaço, raio, tipografia, movimento): nada de hex solto. As
+ * classes levam o prefixo `ui-` para não colidir com as de `pagina.css`. Servido como arquivo
+ * `.css` (sem `style=""`), para a CSP não precisar de `unsafe-inline`.
+ */
+.ui-botao,
+.ui-botao *,
+.ui-campo,
+.ui-campo *,
+.ui-banner,
+.ui-banner *,
+.ui-cartao,
+.ui-cartao *,
+.ui-passos,
+.ui-passos * {
+  box-sizing: border-box;
+}
+
+.ui-oculto-visual {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Botão */
+.ui-botao {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--espaco-2);
+  min-height: var(--tamanho-controle-web);
+  padding: 0 var(--espaco-4);
+  border: 1px solid transparent;
+  border-radius: var(--raio-md);
+  font: inherit;
+  font-weight: var(--peso-semibold);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background var(--duracao-fast) var(--easing-standard),
+    color var(--duracao-fast) var(--easing-standard);
+}
+
+.ui-botao:focus-visible {
+  outline: 2px solid var(--cor-focus-ring);
+  outline-offset: 2px;
+}
+
+.ui-botao--total {
+  display: flex;
+  width: 100%;
+}
+
+.ui-botao--primario {
+  background: var(--cor-action-primary);
+  color: var(--cor-text-on-action);
+}
+
+.ui-botao--primario:hover:not(:disabled, [aria-disabled='true']),
+.ui-botao--primario:active:not(:disabled, [aria-disabled='true']) {
+  background: var(--cor-action-primary-pressed);
+}
+
+.ui-botao--secundario {
+  background: var(--cor-bg-surface);
+  border-color: var(--cor-action-primary);
+  color: var(--cor-text-link);
+}
+
+.ui-botao--secundario:hover:not(:disabled, [aria-disabled='true']),
+.ui-botao--secundario:active:not(:disabled, [aria-disabled='true']) {
+  background: var(--cor-bg-selected);
+}
+
+.ui-botao--terciario {
+  min-height: var(--tamanho-alvo-web);
+  padding: 0 var(--espaco-2);
+  background: transparent;
+  color: var(--cor-text-link);
+}
+
+.ui-botao--terciario:hover:not(:disabled, [aria-disabled='true']),
+.ui-botao--terciario:active:not(:disabled, [aria-disabled='true']) {
+  background: var(--cor-bg-subtle);
+  text-decoration: underline;
+}
+
+.ui-botao--destrutivo {
+  background: var(--cor-action-destructive);
+  color: var(--cor-text-on-action);
+}
+
+.ui-botao--destrutivo:hover:not(:disabled, [aria-disabled='true']),
+.ui-botao--destrutivo:active:not(:disabled, [aria-disabled='true']) {
+  background: var(--cor-action-destructive-pressed);
+}
+
+/* Desabilitado e carregando: fundo e texto de "desabilitado" do design system. */
+.ui-botao:disabled,
+.ui-botao[aria-disabled='true'] {
+  background: var(--cor-bg-subtle);
+  border-color: var(--cor-border-subtle);
+  color: var(--cor-text-tertiary);
+  cursor: default;
+}
+
+.ui-botao--terciario:disabled,
+.ui-botao--terciario[aria-disabled='true'] {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* O rótulo fica no lugar (e some da vista) para o botão manter a largura. */
+.ui-botao--carregando .ui-botao__rotulo {
+  visibility: hidden;
+}
+
+.ui-botao__indicador {
+  position: absolute;
+  width: var(--espaco-4);
+  height: var(--espaco-4);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--raio-full);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-botao__indicador {
+    animation: ui-girar 1s linear infinite;
+  }
+}
+
+@keyframes ui-girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Campo */
+.ui-campo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-1);
+  width: 100%;
+}
+
+.ui-campo__rotulo {
+  font-size: var(--fonte-body-sm-tamanho);
+  line-height: var(--fonte-body-sm-altura-linha);
+  font-weight: var(--peso-semibold);
+  color: var(--cor-text-primary);
+}
+
+.ui-campo__caixa {
+  position: relative;
+}
+
+.ui-campo__entrada {
+  display: block;
+  width: 100%;
+  min-height: var(--tamanho-controle-web);
+  padding: 0 var(--espaco-3);
+  border: 1px solid var(--cor-border-control);
+  border-radius: var(--raio-md);
+  background: var(--cor-bg-surface);
+  color: var(--cor-text-primary);
+  font: inherit;
+}
+
+/* Espaço para o "Mostrar senha" dentro do campo (cresce junto com o texto). */
+.ui-campo__entrada--senha {
+  padding-inline-end: calc(var(--espaco-3) + 8em);
+}
+
+.ui-campo__entrada::placeholder {
+  color: var(--cor-text-tertiary);
+}
+
+.ui-campo__entrada:focus-visible {
+  border-color: var(--cor-focus-ring);
+  outline: 2px solid var(--cor-focus-ring);
+  outline-offset: 2px;
+}
+
+.ui-campo__entrada:disabled {
+  background: var(--cor-bg-subtle);
+  color: var(--cor-text-tertiary);
+}
+
+.ui-campo__entrada:read-only:not(:disabled) {
+  /* Borda de contraste de componente (1.4.11): o campo só de leitura ainda parece um campo. */
+  border-color: var(--cor-border-control);
+  background: var(--cor-bg-subtle);
+}
+
+.ui-campo--erro .ui-campo__entrada {
+  border-color: var(--cor-status-danger-solid);
+  /* Engrossa a borda sem mexer no tamanho da caixa. */
+  box-shadow: inset 0 0 0 1px var(--cor-status-danger-solid);
+}
+
+.ui-campo__alternar {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: var(--espaco-1);
+  min-height: var(--tamanho-alvo-web);
+  padding: 0 var(--espaco-2);
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: var(--raio-sm);
+  background: transparent;
+  color: var(--cor-text-link);
+  font: inherit;
+  font-size: var(--fonte-body-sm-tamanho);
+  font-weight: var(--peso-semibold);
+  cursor: pointer;
+}
+
+.ui-campo__alternar:hover {
+  background: var(--cor-bg-subtle);
+}
+
+.ui-campo__alternar:focus-visible {
+  outline: 2px solid var(--cor-focus-ring);
+  outline-offset: 2px;
+}
+
+.ui-campo__ajuda,
+.ui-campo__erro {
+  margin: 0;
+  font-size: var(--fonte-body-sm-tamanho);
+  line-height: var(--fonte-body-sm-altura-linha);
+}
+
+.ui-campo__ajuda {
+  color: var(--cor-text-secondary);
+}
+
+.ui-campo__erro {
+  color: var(--cor-status-danger-fg);
+}
+
+/* Banner */
+.ui-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--espaco-3);
+  width: 100%;
+  padding: var(--espaco-3) var(--espaco-4);
+  border: 1px solid transparent;
+  border-radius: var(--raio-md);
+}
+
+.ui-banner--informacao {
+  background: var(--cor-status-info-bg);
+  color: var(--cor-status-info-fg);
+}
+
+.ui-banner--sucesso {
+  background: var(--cor-status-success-bg);
+  color: var(--cor-status-success-fg);
+}
+
+.ui-banner--aviso {
+  background: var(--cor-status-warning-bg);
+  color: var(--cor-status-warning-fg);
+}
+
+.ui-banner--erro {
+  background: var(--cor-status-danger-bg);
+  color: var(--cor-status-danger-fg);
+}
+
+.ui-banner__simbolo {
+  flex: none;
+  font-weight: var(--peso-semibold);
+}
+
+.ui-banner__corpo {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-banner__titulo {
+  margin: 0;
+  font-weight: var(--peso-semibold);
+}
+
+.ui-banner__texto {
+  margin: 0;
+}
+
+.ui-banner__acao {
+  margin-top: var(--espaco-2);
+}
+
+/* O botão "Fechar" herda a cor do tom: o terciário padrão (azul) não tem contraste em todos. */
+.ui-banner > .ui-botao--terciario {
+  flex: none;
+  color: inherit;
+}
+
+/* Cartão de autenticação */
+.ui-cartao-fundo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: var(--espaco-4);
+  background: var(--cor-bg-canvas);
+}
+
+.ui-cartao {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-4);
+  /* 400 px, ou a largura menos `space.4` de cada lado quando a janela é menor. */
+  width: min(400px, 100% - 2 * var(--espaco-4));
+  margin-inline: auto;
+  padding: var(--espaco-6);
+  background: var(--cor-bg-surface);
+  border-radius: var(--raio-xl);
+  box-shadow: var(--elevacao-1);
+}
+
+.ui-cartao-fundo > .ui-cartao {
+  /* O fundo já tem o respiro nas laterais. */
+  width: min(400px, 100%);
+}
+
+.ui-cartao__titulo {
+  margin: 0;
+  font-size: var(--fonte-title-tamanho);
+  line-height: var(--fonte-title-altura-linha);
+  font-weight: var(--peso-semibold);
+}
+
+/* 400 px do cartão + `space.4` de cada lado = 432 px: abaixo disso ele enche a janela, sem sombra. */
+@media (max-width: 431px) {
+  .ui-cartao {
+    box-shadow: none;
+  }
+}
+
+/* Indicador de passos */
+.ui-passos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-1);
+}
+
+.ui-passos__texto {
+  margin: 0;
+  font-size: var(--fonte-body-sm-tamanho);
+  line-height: var(--fonte-body-sm-altura-linha);
+  color: var(--cor-text-secondary);
+}
+
+.ui-passos__titulo {
+  margin: 0;
+  font-size: var(--fonte-title-sm-tamanho);
+  line-height: var(--fonte-title-sm-altura-linha);
+  font-weight: var(--peso-semibold);
+}
+
+/* O foco chega por código ao trocar de passo (`refDoTitulo`). */
+.ui-passos__titulo:focus-visible {
+  outline: 2px solid var(--cor-focus-ring);
+  outline-offset: 2px;
+}

@@ -2,7 +2,7 @@
 
 API do Bairrin em NestJS 12 (Node 22, ESM), com Prisma 7 sobre PostgreSQL. São dois processos do mesmo código: o HTTP (`src/main.ts`) e o worker (`src/worker.ts`, relay da outbox, assinantes e tarefas agendadas). Decisões: ADR-003, 004, 010 e 011.
 
-Hoje existe só o núcleo (`src/compartilhado`). Os módulos de negócio (`src/modulos/<contexto>`) começam no plano 01b, com Identidade.
+Além do núcleo (`src/compartilhado`), existe o primeiro módulo de negócio, `src/modulos/identidade` (plano 01b), ainda parcial: domínio, portas e eventos de aplicação, e em `http/` só a lista pública de senhas comuns. Os adaptadores (`infra`), os casos de uso e as rotas chegam nas próximas etapas do plano. Os fakes dos testes de unidade ficam em `test/fakes/` (veja "Identidade" abaixo).
 
 ## Rodar
 
@@ -13,7 +13,7 @@ pnpm --filter api dev       # HTTP em http://localhost:3000 (compila e reinicia 
 pnpm --filter api worker    # worker; precisa do banco migrado e do pg-boss migrado
 ```
 
-Dados de exemplo: `pnpm --filter api seed` (citado no `CLAUDE.md`) ainda não existe; chega no plano 01b.
+Dados de exemplo: `pnpm --filter api seed`, com o banco migrado. Grava a versão 1.0 dos Termos de Uso e da Política de Privacidade, marcadas "RASCUNHO, revisar com advogado", como o dono dos schemas (`DATABASE_URL_MIGRACAO`), porque a aplicação só lê documentos legais. Só roda com `NODE_ENV=development` ou `test` (recusa `production` e ambiente sem `NODE_ENV`); rodar de novo não muda o que já foi gravado.
 
 Os dois compilam com `tsc` e rodam `node dist/...` com `--env-file-if-exists=.env`. Rodar direto o TypeScript (por exemplo com `tsx`) **não funciona**: o `tsx` não emite os metadados de decorator e a injeção de dependência do Nest quebra.
 
@@ -102,6 +102,7 @@ Os testes de integração fazem os dois passos no `globalSetup`. A aplicação s
 main.ts, worker.ts          entradas HTTP e worker
 app.module.ts, worker.module.ts
 cli/migrar-pg-boss.ts       passo de migração do pg-boss, checagem de schemas fechados (S26) e do catálogo (S33)
+cli/seed.ts                 documentos legais de rascunho para desenvolvimento e teste (recusa produção)
 compartilhado/
   config/        ambiente validado com zod
   http/          configurarAplicacao, filtro de erros (Problem Details), pipe de validação, id da requisição
@@ -115,7 +116,21 @@ compartilhado/
   email/         porta EnviadorDeEmail (o falso em memória fica em test/fakes/compartilhado/)
   infra/         adaptadores: PrismaService, UnidadeDeTrabalhoPrisma, PublicadorDeEventosNaOutbox,
                  RepositorioDeAuditoriaPrisma, SMTP, pg-boss, checagens de schemas fechados e do catálogo
-modulos/<contexto>/{dominio,aplicacao,infra,http}   (futuro, a partir do plano 01b)
+modulos/<contexto>/{dominio,aplicacao,infra,http}
+modulos/identidade/
+  dominio/       Conta, Email, Telefone, Sessao, BloqueioDeLogin, CodigoDeVerificacao,
+                 DesafioDeSegundoFator e as portas dos repositórios (repositorios.ts)
+  aplicacao/     eventos de Identidade e portas de serviço (hasher, cifrador, JWT, TOTP...)
+  http/          por enquanto só a lista pública de senhas comuns (senha-fora-da-lista-publica.ts)
+                 e o dado gerado dela (dados/senhas-comuns-publicas.ts)
+                 (infra/ e o resto de http/ chegam nas próximas etapas do plano 01b)
+```
+
+Fakes dos testes de unidade, fora do build (código de produção não importa de `test/`, regra `producao-nao-importa-test`):
+
+```
+test/fakes/compartilhado/   UnidadeDeTrabalhoFalsa, PublicadorDeEventosFalso, EnviadorDeEmailFalso
+test/fakes/identidade/      repositórios em memória (criarIdentidadeEmMemoria) e serviços falsos
 ```
 
 ### Peças do núcleo
@@ -126,6 +141,16 @@ modulos/<contexto>/{dominio,aplicacao,infra,http}   (futuro, a partir do plano 0
 - **Anonimização.** Todo módulo que guarda dado pessoal implementa `AnonimizadorDeTitular` e o registra no `RegistroDeAnonimizadores`.
 - **E-mail.** A porta `EnviadorDeEmail` tem o adaptador SMTP (nodemailer) e um falso em memória.
 - **Erro de assinante.** O erro de um job vai para o `output` do pg-boss com mensagem e causa. Lance erro sanitizado, sem `cause`, sem dado pessoal.
+
+### Identidade
+
+- **Schema `identidade`.** Contas, perfis, sessões, histórico de tokens de renovação, códigos, documentos legais, consentimentos, segundo fator, freio de login e pedidos do titular. A aplicação só lê `documentos_legais` (versão nova entra por migração ou pelo `seed`) e só lê e inclui `consentimentos` e `tokens_de_renovacao_usados`. Só o expurgo de conta não verificada apaga conta: a trigger `contas_so_expurgo` recusa o resto, porque a cascata levaria junto os consentimentos.
+- **Leitura com trava.** O que conta tentativas ou troca o token é lido com trava (`SELECT ... FOR UPDATE`) dentro da unidade de trabalho do caso de uso: `buscarParaAtualizar` do freio, `buscarVigenteParaAtualizar` do código, `buscarPorIdParaAtualizar` do desafio. Sem isso, duas requisições simultâneas perdem uma atualização. As regras estão no cabeçalho de `dominio/repositorios.ts`.
+- **Rotação e revogação da sessão.** A rotação (`gravarRotacao`) é um UPDATE condicionado ao token antigo e à sessão não revogada (`WHERE id = $1 AND token_hash = <trocado> AND revogada_em IS NULL`) que muda só as colunas da rotação. Com 0 linhas, devolve `false`, não grava o histórico, e o caso de uso relê a sessão. A revogação (`atualizar`, `revogarDaFamilia`, `revogarDaConta`) muda só as colunas da revogação, e `atualizar` usa `coalesce`, então a primeira revogação gravada nunca volta a `NULL`. Assim, uma renovação que leu a sessão antes do logout, da redefinição de senha ou da revogação por reuso não a ressuscita, e um logout com leitura velha não rebaixa o prazo nem o par novo de uma rotação recente.
+- **Reuso de token de renovação.** Todo token trocado fica em `tokens_de_renovacao_usados` até a sessão sumir. Apresentar um token antigo da família, não só o anterior imediato, revoga a família inteira. A tolerância de 60 s vale só para o anterior imediato.
+- **Fakes.** `UnidadeDeTrabalhoFalsa` guarda a unidade num AsyncLocalStorage, como a real: duas unidades concorrentes são independentes, e a que falha desfaz só o que gravou. `travar` imita o `FOR UPDATE`, sem detectar deadlock, então trave sempre na mesma ordem. Os repositórios em memória imitam as restrições do banco que os casos de uso sentem.
+- **Lista pública de senhas comuns.** `src/modulos/identidade/http/senha-fora-da-lista-publica.ts` aplica, além das listas escritas à mão do `@bairrin/contratos`, uma lista pública de senhas comuns. É dado de terceiros e existe só na API, que é a autoridade: painel e apps não a carregam. A etapa 16 aplica `comSenhaForaDaListaPublica` em `criarContaSchema` (`senha`) e em `redefinirSenhaSchema` (`novaSenha`). Limitação do zod 4.6.7: a regra é do corpo, e o zod a pula quando outro campo tem um erro que encerra a validação (e-mail inválido, por exemplo). Nesse caso, a recusa da lista pública só aparece no envio seguinte.
+- **Dado gerado.** `http/dados/senhas-comuns-publicas.ts` sai de `node scripts/gerar-senhas-comuns.mjs`, rodado à mão, e nunca é editado direto. O roteiro está no README do `@bairrin/contratos`. Fontes e licenças, com aviso no cabeçalho do arquivo: SecLists (MIT), nomes ("Fonte: IBGE") e palavras do OpenSubtitles (ODC-BY).
 
 ### Comportamento HTTP
 
@@ -158,5 +183,5 @@ pnpm --filter api test:integracao -- outbox email-smtp   # só os arquivos que c
 
 ## Futuro
 
-- `pnpm --filter api seed` e `seed:admin` estão no `package.json`, mas os CLIs (`src/cli/seed.ts`, `seed-admin.ts`) ainda não existem (plano 01b). Seeds vão recusar `NODE_ENV=production`; o `seed:admin` é a exceção, por CLI.
+- `seed:admin` está no `package.json`, mas o CLI (`src/cli/seed-admin.ts`) ainda não existe (plano 01b, etapa 13). Ao contrário do `seed`, ele roda em produção, por CLI.
 - `/v1/docs` (OpenAPI gerado dos esquemas) e `GET /v1/app/versao-minima`.

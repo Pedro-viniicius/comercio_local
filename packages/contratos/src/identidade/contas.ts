@@ -19,8 +19,10 @@ import {
   MOTIVO_SENHA_COMUM,
   MOTIVO_SENHA_CURTA,
   MOTIVO_SENHA_LONGA,
+  MOTIVO_SENHA_SO_DE_DIGITOS_E_SIMBOLOS,
   ehSenhaBemFormada,
   ehSenhaComum,
+  ehSenhaSoDeDigitosESimbolos,
   normalizarCelular,
   normalizarCodigo,
   normalizarEmail,
@@ -77,7 +79,8 @@ export const telefoneSchema = z
 /**
  * Senha nova (cadastro e redefinição): 8 a 128 caracteres, texto Unicode bem
  * formado (S75) e fora da lista de senhas comuns (S22), que sai com o código
- * `comum`. Não é cortada nem normalizada aqui: o tamanho é medido na senha
+ * `comum` (a senha só de dígitos e símbolos sai com o mesmo código e motivo
+ * próprio, R34). Não é cortada nem normalizada aqui: o tamanho é medido na senha
  * digitada, e o `Hasher` (etapa 6) aplica NFKC no hash e na verificação.
  */
 export const senhaNovaSchema = z
@@ -92,6 +95,11 @@ export const senhaNovaSchema = z
     abort: true,
   })
   .refine(ehSenhaBemFormada, { error: MOTIVO_SENHA_COM_CARACTERE_INVALIDO, abort: true })
+  .refine((senha) => !ehSenhaSoDeDigitosESimbolos(senha), {
+    error: MOTIVO_SENHA_SO_DE_DIGITOS_E_SIMBOLOS,
+    params: { codigo: 'comum' },
+    abort: true,
+  })
   .refine((senha) => !ehSenhaComum(senha), {
     error: MOTIVO_SENHA_COMUM,
     params: { codigo: 'comum' },

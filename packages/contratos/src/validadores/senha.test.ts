@@ -15,7 +15,11 @@ describe('problemaDaSenha', () => {
     expect(TAMANHO_MAXIMO_DA_SENHA).toBe(128);
     expect(problemaDaSenha('feira-do-bairro-7')).toBeNull();
     expect(problemaDaSenha('Xk7#pq2w')).toBeNull();
-    expect(problemaDaSenha('Xk7#pq2w'.repeat(16))).toBeNull();
+    expect(problemaDaSenha(`${'Xk7#pq2w'.repeat(15)}Zr9!mv4T`)).toBeNull();
+  });
+
+  it('o mesmo trecho com 3 letras ou mais repetido até 128 caracteres é comum (S74, etapa 5b)', () => {
+    expect(problemaDaSenha('Xk7#pq2w'.repeat(16))).toBe('comum');
   });
 
   it('recusa curta e longa nos limites exatos', () => {

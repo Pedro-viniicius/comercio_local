@@ -37,8 +37,8 @@ Painel: P1 Entrar → P1a Segundo fator (ou P1b Configurar 2FA, obrigatório se 
 | Campo de código (6 dígitos) | Novo: **um único campo** numérico exibido como 6 casas (`font.title`, algarismos tabulares), aceita colar, preenchimento automático de código de uso único do sistema; rótulo "Código de 6 dígitos" | mesmo local dos base |
 | Cabeçalho de marca (logo + slogan) | Novo, usa `bairrin-logo-horizontal.svg` | `packages/mobile-base/src/componentes/` |
 | Leitor de texto legal | Novo: título (`font.title`), linha "Versão X · vigente desde dd/mm/aaaa" (`text.secondary`), conteúdo com títulos h2 e parágrafos de até ~70 caracteres por linha, rolagem com "Voltar ao topo" | `packages/mobile-base/src/telas/` |
-| Cartão de autenticação (painel) | Novo: contêiner da seção Layout | `apps/painel/src/autenticacao/` |
-| Indicador de passos (painel) | Novo: texto "Passo 1 de 3" + título do passo; sem barra só visual | `apps/painel/src/autenticacao/` |
+| Cartão de autenticação (painel) | Novo: contêiner da seção Layout | `apps/painel/src/componentes/` (como manda o plano 01b) |
+| Indicador de passos (painel) | Novo: texto "Passo 1 de 3" + título do passo; sem barra só visual | `apps/painel/src/componentes/` (como manda o plano 01b) |
 | QR code (painel) | Novo, com a dependência `qrcode` já prevista no plano 01b, etapa 1 | `apps/painel/src/autenticacao/` |
 | Lista de códigos de recuperação (painel) | Novo: grade de 2 colunas × 5, fonte monoespaçada do sistema, `bg.subtle`, ações "Copiar todos" e "Baixar (.txt)" | `apps/painel/src/autenticacao/` |
 

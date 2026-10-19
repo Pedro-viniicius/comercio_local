@@ -36,13 +36,22 @@ pnpm --filter painel exec vitest run src/App.test.tsx
 ```
 src/main.tsx            monta o cliente da API e renderiza
 src/App.tsx             página do estado da API
+src/componentes/        componentes base: Botao, Campo, Banner, Cartao, IndicadorDePassos e componentes.css
 src/textos/pt-BR.ts     textos de interface (único idioma do MVP)
+src/textos/mensagem-do-campo.ts   texto de erro de campo: chave `erro.<campo>.<codigo>` ou o `motivo` da API
 src/estilos/            tokens.css.ts (variáveis CSS a partir de @bairrin/tokens) e pagina.css
 ```
 
 - **Textos de interface** ficam em `src/textos/pt-BR.ts`, nunca soltos no componente. Erro de campo da API é mostrado por `erro.<campo>.<codigo>`.
+- **Erro de campo (CA-13).** `mensagemDoCampo(campo, codigo, motivo, tela?)` devolve `textos.erro[campo][codigo]` (antes, `textos.erroPorTela[tela][campo][codigo]` se a tela passar o nome dela: o passo 2 da configuração do 2FA usa isso para `codigo.invalido`, pois a API devolve o mesmo campo nas duas telas) e, sem essa chave, o `motivo` em português que a API mandou (e, sem ele, "Confira este campo"). Serve ao 400 da API e à validação local, que usam os mesmos esquemas de `@bairrin/contratos`. Não há chave onde o `motivo` já é o texto final e varia (`senha.invalido`, `novaSenha.invalido` e `novaSenha.comum`: curta, longa, caractere que não pode, só dígitos e símbolos, senha comum). Nos apps, a 12a segue a mesma regra. Código novo de uma API mais nova cai no `motivo`.
+- **Componentes base** (`src/componentes/`, importe o arquivo do componente; ele carrega o `componentes.css`). Estilo só com variáveis de tokens, classes com prefixo `ui-`.
+  - `Botao`: `variante` (`primario`, `secundario`, `terciario`, `destrutivo`), `carregando` (não usa `disabled`: segue focável, ignora clique e Enter e diz "Enviando…" ao leitor de tela), `larguraTotal`. É `type="button"` por padrão.
+  - `Campo`: rótulo sempre visível, `ajuda` e `erro` ligados por `aria-describedby`, `aria-invalid` no erro, região educada para o erro surgir anunciado; `tipo` `texto`, `email` ou `senha` (com "Mostrar senha"). O `autoComplete` certo (`current-password`, `new-password`, `one-time-code`) é da tela. Sem máscara de telefone: o painel não tem esse campo.
+  - `Banner`: `tom` `informacao`, `sucesso`, `aviso` ou `erro` (o erro é `role="alert"`; os demais, `role="status"`), `titulo`, `acao` e `aoFechar` (o "Fechar" tem nome acessível "Fechar aviso", com o título quando há).
+  - `Cartao`: cartão de autenticação de 400 px (`centralizado` o põe no meio da janela). Abaixo de 432 px enche a janela e perde a sombra.
+  - `IndicadorDePassos`: "Passo N de M" mais o título do passo (`refDoTitulo` para levar o foco ao trocar de passo; `nivelDoTitulo` 2 por padrão, 1 se ele for o título da página; o título é descrito pelo "Passo N de M").
 - **Tokens como CSS de arquivo.** Um plugin do Vite (`vite.config.ts`) entrega as variáveis como o módulo virtual `virtual:bairrin-tokens.css`. No build vira um arquivo `.css`, sem `<style>` nem `style=""` em tempo de execução, para a CSP não precisar de `unsafe-inline`.
-- Os testes usam Vitest com jsdom e Testing Library. O Vitest esvazia arquivos `.css`; o teste que lê `pagina.css` o libera em `test.css.include`.
+- Os testes usam Vitest com jsdom e Testing Library. O Vitest esvazia arquivos `.css`; os testes que leem `pagina.css` e `componentes.css` os liberam em `test.css.include` (`vite.config.ts`).
 - `import.meta.env.VITE_API_URL` é declarado em `src/env.d.ts`.
 
 ## Hospedagem (Fly.io, ADR-005)

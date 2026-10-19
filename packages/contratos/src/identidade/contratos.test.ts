@@ -135,13 +135,11 @@ describe('POST /v1/contas (CA-01)', () => {
       'Ana\ud800',
       'Ana\u{e0080}',
     ]) {
-      expect(campos(criarContaSchema, { ...cadastro, nome }), JSON.stringify(nome)).toEqual([
-        {
-          campo: 'nome',
-          codigo: 'invalido',
-          motivo: 'Confira o nome: tem caractere que não pode ser usado',
-        },
-      ]);
+      // Um erro só, no campo `nome`: o código (`invalido` ou `obrigatorio`) é do dev.
+      expect(
+        campos(criarContaSchema, { ...cadastro, nome }).map((erro) => erro.campo),
+        JSON.stringify(nome),
+      ).toEqual(['nome']);
     }
   });
 
@@ -176,12 +174,24 @@ describe('POST /v1/contas (CA-01)', () => {
   });
 
   it('senha comum sai com o código "comum" pelo camposDoErroZod (S22)', () => {
-    for (const senha of ['senha123', '12345678', 'Flamengo2026', 'qwertyuiop']) {
+    for (const senha of ['senha123', 'Flamengo2026', 'qwertyuiop', 'joaopedro123']) {
       expect(campos(criarContaSchema, { ...cadastro, senha }), senha).toEqual([
         {
           campo: 'senha',
           codigo: 'comum',
           motivo: 'Essa senha é muito comum. Escolha outra, mais difícil de adivinhar',
+        },
+      ]);
+    }
+  });
+
+  it('senha só de dígitos e símbolos sai com "comum" e motivo próprio, num erro só (R34)', () => {
+    for (const senha of ['12345678', '10203040', '!@#$%^&*', '1987-06-15']) {
+      expect(campos(criarContaSchema, { ...cadastro, senha }), senha).toEqual([
+        {
+          campo: 'senha',
+          codigo: 'comum',
+          motivo: 'Use letras também: senha só com números e símbolos é fácil de adivinhar',
         },
       ]);
     }
@@ -803,6 +813,65 @@ describe('um erro por campo também em campo aninhado e com length grande (Q14)'
           expect(erros[0]?.motivo, descricao).not.toBe('');
         }
       }
+    }
+  });
+});
+
+// QA da etapa 5b (S73, R34, S74): os dois corpos com senha nova e o cadastro com nome.
+describe('QA da etapa 5b: nome, motivo próprio e login', () => {
+  const MOTIVO_SO_DIGITOS =
+    'Use letras também: senha só com números e símbolos é fácil de adivinhar';
+  const redefinicao = {
+    email: 'ana@exemplo.com',
+    codigo: '012345',
+    novaSenha: 'feira-do-bairro-7',
+  };
+
+  it('nome feito só de seletor de emoji (U+FE0F, U+FE0E) é recusado no cadastro (S73)', () => {
+    for (const nome of ['️', '︎', '️️', ' ️ ']) {
+      // Um erro só, no campo `nome`: o código (`invalido` ou `obrigatorio`) é do dev.
+      expect(
+        campos(criarContaSchema, { ...cadastro, nome }).map((erro) => erro.campo),
+        JSON.stringify(nome),
+      ).toEqual(['nome']);
+    }
+  });
+
+  it('nome com emoji e seletor continua aceito no cadastro', () => {
+    expect(criarContaSchema.parse({ ...cadastro, nome: ' Ana ❤️ ' }).nome).toBe('Ana ❤️');
+  });
+
+  it('a redefinição também dá o motivo próprio à senha só de dígitos e símbolos (R34)', () => {
+    expect(campos(redefinirSenhaSchema, { ...redefinicao, novaSenha: '10203040' })).toEqual([
+      { campo: 'novaSenha', codigo: 'comum', motivo: MOTIVO_SO_DIGITOS },
+    ]);
+    expect(campos(redefinirSenhaSchema, { ...redefinicao, novaSenha: 'joaopedro123' })).toEqual([
+      {
+        campo: 'novaSenha',
+        codigo: 'comum',
+        motivo: 'Essa senha é muito comum. Escolha outra, mais difícil de adivinhar',
+      },
+    ]);
+  });
+
+  it('senha curta só de dígitos fica "curta": o tamanho vem antes do motivo próprio', () => {
+    expect(campos(criarContaSchema, { ...cadastro, senha: '1234567' })).toEqual([
+      { campo: 'senha', codigo: 'invalido', motivo: 'Use 8 caracteres ou mais' },
+    ]);
+  });
+
+  it('o login aceita a senha de conta antiga mesmo que hoje seja só de dígitos ou comum', () => {
+    for (const senha of ['12345678', '10203040', 'joaopedro123', 'senhasenha']) {
+      expect(
+        entrarSchema.safeParse({ email: 'ana@exemplo.com', senha, cliente: 'painel' }).success,
+        senha,
+      ).toBe(true);
+    }
+  });
+
+  it('o cadastro não recusa por regra de forma uma senha forte parecida com as recusadas', () => {
+    for (const senha of ['joaopedro-feira-77', 'Gabriel&Silva#Zq9', 'sen-ha-Xk7q-Lm2z']) {
+      expect(criarContaSchema.safeParse({ ...cadastro, senha }).success, senha).toBe(true);
     }
   });
 });
