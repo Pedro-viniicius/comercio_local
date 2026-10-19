@@ -11,7 +11,7 @@
 - [dependency-cruiser e fronteiras](depcruise-fronteiras.md) — exclude derruba npm, caminhos ../ nas fixtures, CLI no teste
 - [pg-boss, outbox e e-mail](pgboss-eventos-email.md) — pg-boss sem CREATE (CLI + GRANTs), output do job guarda erro, nodemailer 10, Mailpit, lint
 - [Docs: comandos verificados](docs-comandos-verificados.md) — Prisma CLI a partir de apps/api, cópia limpa real, node --run sem env-file, Prettier, EAS pago
-- [Deploy, TLS e Sentry](deploy-imagem-tls-sentry.md) — Sentry 11 sem sendDefaultPii, sessões/release do CI, env lido pelo SDK (Spotlight/debug/traces), Prisma verify-full, actionlint
+- [Deploy, TLS e Sentry](deploy-imagem-tls-sentry.md) — Sentry 11 sem sendDefaultPii, sessões/release, env lido pelo SDK, Prisma verify-full + receita da sonda TLS, actionlint
 - [Cliente autenticado e fila única](cliente-api-sessao.md) — laço de microtarefas trava o Vitest, ??= com finally, promessa adiada sem rejeitar, mutação em lote
 - [Lista pública de senhas comuns](senhas-comuns-lista-publica.md) — fica só na API, licenças do zxcvbn pt-br, API de sobrenomes do IBGE, refine de corpo pulado, literal no .d.ts
 - [Domínio de Identidade](identidade-dominio.md) — CHECKs no domínio, fakes com ALS e travas, portas ParaAtualizar, trigger do expurgo, docs só pelo dono

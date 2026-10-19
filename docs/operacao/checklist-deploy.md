@@ -96,7 +96,7 @@ Vale para produção e homologação.
 
 ## 4. GitHub e cadeia de suprimentos
 
-- [ ] **(obrigatório, S12)** `pnpm audit --prod --audit-level=high` bloqueante no CI e verde. Em 2026-10-16 ele falha por transitivas do Prisma 7.10.0; a correção está no 7.10.1, elegível pelo `minimumReleaseAge` em 2026-10-18.
+- [ ] **(obrigatório, S12)** `pnpm audit --prod --audit-level=high` bloqueante no CI e verde. Verde desde 2026-10-18, com o Prisma 7.10.1.
 - [ ] Workflows com `permissions: contents: read` e actions fixadas por SHA (ver `.github/workflows/`).
 - [ ] Pull request de fork roda sem acesso a segredos.
 - [ ] Segredos do CI só em GitHub secrets.

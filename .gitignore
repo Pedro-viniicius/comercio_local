@@ -13,6 +13,9 @@ web-build/
 .env*
 !.env.example
 
+# Vínculo local com a Vercel (ids do projeto; criado por `vercel link`)
+.vercel
+
 # Expo e React Native
 .expo/
 expo-env.d.ts

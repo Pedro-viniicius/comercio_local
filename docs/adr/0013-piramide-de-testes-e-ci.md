@@ -27,7 +27,7 @@ Cadeia de suprimentos (S12):
 ## Consequências
 
 - **Desvio do plano:** o plano 00 e o 01a escreviam `save-exact` no `.npmrc` e `onlyBuiltDependencies`. No pnpm 12.4.1 o `.npmrc` só vale para registry e autenticação (`save-exact=true` ali é ignorado em silêncio), e o nome atual é `allowBuilds` (mapa `pacote: true|false`). Valem `saveExact: true`, `minimumReleaseAge: 4320` (em minutos) e `allowBuilds` no `pnpm-workspace.yaml`. Com `strictDepBuilds`, pacote novo com script de instalação faz a instalação falhar até alguém decidir.
-- Versão publicada há menos de 3 dias não é instalável, nem como transitiva. Isso adia correções de segurança em até 3 dias (hoje, o Prisma 7.10.1).
+- Versão publicada há menos de 3 dias não é instalável, nem como transitiva. Isso adia correções de segurança em até 3 dias (exemplo: a correção do Prisma 7.10.1 só pôde entrar em 2026-10-18, dois dias depois do aviso do audit).
 - Os testes de integração apagam e recriam o Postgres de teste a cada execução, então rodam um arquivo por vez.
 - Os testes de fronteiras e os do verificador de migrações são testes comuns e entram em `pnpm test` e no PR.
 - Os testes dos scripts rodam com `node --test "scripts/**/*.test.mjs"` (o Node 22 não aceita a pasta sozinha).

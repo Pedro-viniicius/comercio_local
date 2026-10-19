@@ -42,3 +42,4 @@ Lista do que apareceu nas revisões (01a e grupo 0 do 01b, 2026-10-16). Procurar
 - Tabelas auxiliares sem retenção (S81; prazos no plano 01b etapa 13/P12, ainda sem código): freio com HMAC de IP (reversível por enumeração com a chave), sessões revogadas, códigos usados. **How to apply:** cobrar tarefa de limpeza junto da tabela.
 
 Relacionado: [[areas-sensiveis]]
+- Atualização de dependência sem atualizar os avisos que ela resolve (S86, Prisma 7.10.1). **Why:** README e checklist que dizem que o audit falha "por enquanto" ensinam a ignorar a falha do audit. **How to apply:** em bump de dependência, procurar a versão antiga e o GHSA em `README.md`, `docs/operacao/checklist-deploy.md` e `docs/adr/`.

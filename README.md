@@ -24,9 +24,8 @@ Plano `docs/produto/planos/01a-fundacao-repositorio.md`, situação em 2026-10-1
 | CI, `Dockerfile` e `fly.toml` da API, Sentry                                   | Prontos, sem publicar (etapa 13)                                            |
 | `packages/mobile-base`                                                         | Futuro (plano 01b)                                                          |
 
-Dois avisos de hoje, que somem sozinhos com o tempo:
+Um aviso de hoje, que some sozinho com o tempo:
 
-- `pnpm audit --prod --audit-level=high` falha por dependências transitivas do Prisma 7.10.0. A correção está no 7.10.1, que só pode ser instalado a partir de 2026-10-18 por causa do `minimumReleaseAge`.
 - O Expo SDK 58 estável (`expo` 58.0.11, React Native 0.88.0) fica elegível no `minimumReleaseAge` em 2026-10-19. Até lá os apps não podem ser criados.
 
 ## Estrutura

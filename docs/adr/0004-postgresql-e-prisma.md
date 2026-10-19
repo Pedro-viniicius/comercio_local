@@ -9,7 +9,7 @@ O produto lida com dinheiro e dados pessoais desde o primeiro pedido: precisa de
 
 ## Decisão
 
-- PostgreSQL 17 (a major mais recente oferecida pelo Supabase na data) e Prisma **7.10.0**, a última major estável. Nada de RC.
+- PostgreSQL 17 (a major mais recente oferecida pelo Supabase na data) e Prisma **7.10** (7.10.0 na decisão; 7.10.1 desde 2026-10-18, que fecha o `pnpm audit`), a última major estável. Nada de RC.
 - O Prisma 7 usa driver adapter: `@prisma/adapter-pg`. O client é gerado em `apps/api/src/compartilhado/infra/gerado/` (fora do git) por `prisma generate`, que roda no `postinstall` da API.
 - O Prisma 7 não lê `.env`. A CLI recebe `DATABASE_URL_MIGRACAO` do ambiente (`node --env-file`, segredos do Fly ou o `globalSetup` dos testes). O `apps/api/prisma.config.ts` força `schema=migracoes` nessa URL.
 - Um schema por contexto (`multiSchema`). **Nada em `public`**. A tabela de controle `_prisma_migrations` vive no schema `migracoes`, sem acesso da aplicação.

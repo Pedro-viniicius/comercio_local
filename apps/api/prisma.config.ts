@@ -55,10 +55,12 @@ function exigirCertificado(caminho: string, lerArquivo: LerArquivo): void {
  *   assim nenhum segredo mal configurado manda o controle para `public`;
  * - TLS (S21): o segredo usa a forma do libpq, a mesma que o `pg` entende
  *   (`sslmode=verify-full&sslrootcert=<CA>`). O schema engine não conhece
- *   `verify-full`: cai para `prefer` e aceita qualquer certificado (conferido
- *   com o Prisma 7.10 contra um Postgres com CA própria). Por isso a URL é
- *   traduzida para `sslmode=require&sslcert=<CA>&sslaccept=strict`, que
- *   confere a cadeia e o nome do servidor;
+ *   `verify-full`: cai para `prefer` e aceita qualquer certificado. Por isso a
+ *   URL é traduzida para `sslmode=require&sslcert=<CA>&sslaccept=strict`, que
+ *   confere a cadeia e o nome do servidor (conferido com o Prisma 7.10.1
+ *   (schema engine d1b3f37) em 2026-10-18, contra um Postgres com CA própria:
+ *   a tradução recusa CA errada e nome que não confere; `verify-full` cru
+ *   aceita os dois);
  * - em produção (`NODE_ENV=production`, como na imagem), recusa URL sem
  *   `verify-full`, sem `sslrootcert` ou com a CA ainda não substituída.
  * Vazia só para comando que não conecta (`prisma generate`); quem conecta

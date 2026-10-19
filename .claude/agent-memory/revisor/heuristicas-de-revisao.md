@@ -1,6 +1,6 @@
 ---
 name: heuristicas-de-revisao
-description: Padrões recorrentes no Bairrin (motivo novo mascarado pelo texto do cliente, refine de corpo no zod 4, custo da regra de senha, docs atrasadas, esquema tolerante, fronteiras, DI, logger e lint do log, verificador SQL, catálogo P8, zod 4 tamanho, integração compartilhada com o qa, lock na leitura das portas, 401 repetido pelo cliente-api)
+description: Padrões recorrentes no Bairrin (motivo novo mascarado pelo texto do cliente, refine de corpo no zod 4, custo da regra de senha, docs atrasadas, esquema tolerante, fronteiras, DI, logger e lint do log, verificador SQL, catálogo P8, zod 4 tamanho, integração compartilhada com o qa, lock na leitura das portas, 401 repetido pelo cliente-api, binário trocado em patch de dependência)
 metadata:
   type: project
 ---
@@ -35,6 +35,8 @@ Padrões vistos na revisão do 01a (2026-10-16); confira no código antes de rep
 - **Custo da regra de senha comum (`senhas-comuns.ts`, fechado na 5b r2, 2026-10-18):** depois do R1 (cache por chamada em `ConsultaAsListas`, corte pela maior entrada = 19 com a lista pública, composto só onde o que volta é disfarce) o pior caso medido ficou < 0,3 ms. Se mexerem na regra, sonde de novo: `node <scratch>/sonda.mts` importando `senhas-comuns.ts` e `apps/api/.../dados/senhas-comuns-publicas.ts` por caminho absoluto; formas a testar: 8 dígitos/disfarces + miolo de 2-3x a maior entrada, `ab`+`!`x124+`cd`, emoji nas pontas. Compare com `git show HEAD:` num arquivo do scratchpad para saber se uma perda de detecção é regressão.
 
 - **Lista de pendências no `cliente-api` (Q21, r3):** se a leitura das pendências falha no logout com sessão, `definirPendentes([nova])` sobrescreve as anteriores guardadas (SUGESTÃO R10). Linha de base que o lead manda pode já incluir os testes novos do dev: contagem igual não é sinal de teste faltando.
+
+- **Atualização de dependência com binário (Prisma 7.10.0 → 7.10.1, 2026-10-18):** patch do npm pode trocar o binário nativo: o 7.10.1 trouxe outro schema engine (`engines-version` 8.1.0-1.d1b3f37, antes 7.10.0-4.0edf323). Comportamento provado só empiricamente contra o binário antigo (TLS do schema engine, S21, `urlDeMigracao`; o teste unitário só confere a URL) tem de ser sondado de novo. Compare `schema-engine-* --version` dos dois `node_modules/.pnpm/@prisma+engines@*`. Rodada 2 (2026-10-18): sonda refeita, engine d1b3f37 igual ao antigo em TLS; recomendado travar o hash de `@prisma/engines-version` num teste e versionar a receita da sonda (estava só no scratchpad). Docs com aviso datado ("hoje", "falha em ...") ficam velhas quando a pendência fecha: grep da versão em README, ADRs e checklist.
 
 **Why:** cada item gerou achado ou pergunta nas rodadas do 01a e do grupo 0 do 01b.
 **How to apply:** usar como checklist extra nas próximas revisões (01b em diante). Ver [[feedback-revisoes-grandes]].
