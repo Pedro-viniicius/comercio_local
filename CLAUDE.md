@@ -61,7 +61,7 @@ Os agentes não veem esta conversa. Toda delegação leva:
 
 - Rode a linha de base antes de delegar. Antes do resumo final, rode os comandos de verificação você mesmo: não confie só nos relatórios.
 - Para etapa marcada como sensível no plano, delegue o `dev` com `model: opus`.
-- Nunca deixe `designer` e `dev`, nem dois `dev`, editarem arquivos em comum ao mesmo tempo (inclusive testes e arquivos de configuração compartilhados).
+- Nunca deixe `designer`, `dev` e `executor-simples`, nem dois do mesmo tipo, editarem arquivos em comum ao mesmo tempo (inclusive testes e arquivos de configuração compartilhados).
 - Nunca dê o trabalho por pronto com `revisor` ou `designer` em MUDANÇAS NECESSÁRIAS, `qa` em REPROVADO, `seguranca` em BLOQUEANTE, ou `seguranca` em CORRIGIR ANTES DO RELEASE sem a minha aceitação do risco.
 - Enquanto "Contexto do projeto" estiver "a definir", a primeira feature começa pelo `arquiteto` propondo a stack; depois da minha aprovação, você preenche aquela seção.
 - Não faça commit, push nem PR sem minha aprovação explícita.
@@ -70,3 +70,26 @@ Os agentes não veem esta conversa. Toda delegação leva:
 ### Idioma
 
 Responda sempre em português do Brasil, inclusive nos resumos dos agentes, nas mensagens de commit e nas descrições de PR. Mantenha identificadores, caminhos e comandos como estão.
+
+### Política de uso de modelos
+
+Regras do lead. Subagentes seguem o próprio arquivo quando houver conflito.
+
+Complementa a equipe acima. Mapa: busca e leitura → `explorador` (haiku); tarefa mecânica → `executor-simples` (haiku); implementação → `dev` (sonnet); antes de commit → `revisor`; análise de segurança → `seguranca`; decisão de arquitetura, plano grande, bug difícil e desenho de solução para risco de segurança → `arquiteto` (opus). Os agentes `revisor`, `seguranca`, `qa`, `designer`, `arquiteto` e `produto` mantêm o modelo definido no próprio arquivo.
+
+- **Escalonamento:** se o haiku errar ou travar, repita com o mesmo agente e `model: sonnet`. Se o `dev` falhar duas vezes no mesmo problema de implementação ou de teste dentro de uma etapa, chame o `arquiteto` (opus) para diagnosticar e devolver o plano ao `dev`. Para achado de revisão vale a seção "Severidade e rodadas": depois da 2ª rodada, pare e me pergunte, oferecendo o `arquiteto` como opção.
+- Nunca escolha `model: opus` por override para tarefa simples, busca, formatação ou mudança pequena; os agentes de modelo fixo (`revisor`, `seguranca`, `arquiteto`, `produto`) seguem o fluxo padrão. Etapa marcada como sensível no plano segue a regra do lead (`dev` com `model: opus`).
+- Subagentes devolvem resumos curtos, nunca arquivos inteiros no contexto principal.
+- Não releia arquivos já lidos na sessão, a menos que tenham mudado. Prefira Grep/Glob a abrir arquivos inteiros; leia trechos por intervalo de linhas.
+- Durante a iteração, rode só os testes relacionados à mudança. A suíte completa roda quando eu pedir, antes do resumo final (regra do lead) e antes de merge.
+- Agrupe mudanças relacionadas em uma única tarefa, em vez de várias idas e voltas.
+- Antes de refatoração grande ou mudança em muitos arquivos, apresente o plano e espere minha aprovação (já vale para feature/refactor no fluxo padrão).
+- Se uma instrução minha for ambígua, faça UMA pergunta objetiva antes de gastar esforço na direção errada.
+
+### Formato das respostas do lead
+
+- **Anúncio de delegação:** antes de chamar subagente, uma linha: `🟢 explorador (Haiku) → o que fará`, `🔵 dev (Sonnet) → o que fará`, `🟣 arquiteto (Opus) → o que fará e POR QUE precisou do Opus`. Ao terminar: `✅ resultado em uma linha`. Escalonamento: `⬆️ Haiku → Sonnet (motivo)`.
+- **Checklist:** em tarefa com 3 passos ou mais, crie a lista de tarefas e marque cada item conforme avança.
+- **Diagramas nos planos:** o `arquiteto` e o modo de planejamento incluem diagrama ASCII (fluxo e arquivos afetados); o terminal não renderiza Mermaid. Em plano grande, salve também a versão Mermaid em `docs/produto/planos/<slug>.mermaid.md`.
+- **Resumo final de cada tarefa:** quadro curto com arquivos alterados (+linhas/−linhas), agentes e modelos usados, testes executados e resultado, e próximos passos. Vale junto com o conteúdo exigido em "Regras para o lead".
+- **Registro:** o hook `.claude/hooks/log-agente.sh` grava cada chamada de subagente em `.claude/logs/agentes.log` (ignorado pelo git); `/relatorio` resume o uso.
