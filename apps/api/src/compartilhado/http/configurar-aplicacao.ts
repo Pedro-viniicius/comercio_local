@@ -3,6 +3,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { NestApplicationOptions } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { CABECALHO_DO_CLIENTE } from '@bairrin/contratos';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import type { Ambiente } from '../config/ambiente.ts';
@@ -38,8 +40,8 @@ function semCache(_req: IncomingMessage, res: ServerResponse, proximo: () => voi
 
 /**
  * Aplica, nesta ordem e antes dos middlewares dos módulos: id da requisição,
- * `no-store`, helmet, CORS e leitor de JSON com limite. Assim até a
- * requisição recusada pelo limite de corpo sai com id e cabeçalhos.
+ * `no-store`, helmet, CORS, leitor de JSON com limite e leitor de cookies.
+ * Assim até a requisição recusada pelo limite de corpo sai com id e cabeçalhos.
  */
 export function configurarAplicacao(app: NestExpressApplication, ambiente: Ambiente): void {
   app.useLogger(app.get(Logger));
@@ -57,10 +59,14 @@ export function configurarAplicacao(app: NestExpressApplication, ambiente: Ambie
     // Cookie de sessão do painel (01b). Só vale para as origens acima.
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    // `X-Cliente: painel` acompanha o cookie na renovação e no logout do painel (01b).
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', CABECALHO_DO_CLIENTE],
     exposedHeaders: [CABECALHO_ID_REQUISICAO, 'Retry-After'],
     maxAge: 600,
   });
   app.useBodyParser('json', { limit: LIMITE_DO_CORPO });
+  // Cookie de renovação do painel (01b, etapa 16). Sem segredo de assinatura: o
+  // valor já é o token opaco, conferido pelo HMAC no banco.
+  app.use(cookieParser());
   app.enableShutdownHooks();
 }

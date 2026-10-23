@@ -5,3 +5,4 @@
 - [Etapa 5b: lista de senhas e nome](etapa-5b-lista-senhas.md) — rodada 2: Q17-Q19 fechados, taxas de falso positivo, testes, mutação
 - [Grupo C: painel e cliente-api (5c, 15)](grupo-c-painel-e-cliente-api.md) — R1: Q22/Q23; R2: Q22/Q23 fechados, Q25 aberto; R3: Q25/R8, R10, outra_aba provados; testes, mutação, Chrome/CSP
 - [Etapa 13 do 01b: assinantes, tarefas, seed:admin](etapa-13-assinantes-tarefas.md) — R1-R3: Q26-Q29 fechados, APROVADO; testes, mutação, colisão de banco com outros agentes
+- [Etapa 16 do 01b: HTTP de identidade (grupo E)](etapa-16-http-identidade.md) — R1: APROVADO COM RESSALVAS, Q30 baixo, testes novos, mutação 26/26, armadilhas do supertest e do migracao

@@ -33,6 +33,7 @@
 // uma exclusão desativou a conta, ou um logout, uma exclusão ou uma
 // redefinição de senha revogou a sessão depois da primeira leitura, um dos dois
 // UPDATEs não muda nada e tudo é desfeito, inclusive o uso do código.
+import type { Cliente } from '@bairrin/contratos/validadores';
 import { Injectable } from '@nestjs/common';
 import { Relogio } from '../../../../compartilhado/tempo/relogio.ts';
 import { UnidadeDeTrabalho } from '../../../../compartilhado/transacao/unidade-de-trabalho.ts';
@@ -59,7 +60,12 @@ export interface EntradaDeVerificarEmail {
 }
 
 export type ResultadoDeVerificarEmail =
-  | { readonly tipo: 'verificado'; readonly sessao: SessaoEmitida }
+  | {
+      readonly tipo: 'verificado';
+      readonly sessao: SessaoEmitida;
+      /** Cliente da sessão: no painel, a camada HTTP entrega o token de renovação pelo cookie. */
+      readonly cliente: Cliente;
+    }
   | { readonly tipo: 'codigo_invalido' }
   | { readonly tipo: 'sessao_invalida' }
   /** Freio por e-mail da conta ativo (429 com `Retry-After` = `segundosDeEspera`; S93). */
@@ -171,6 +177,7 @@ export class VerificarEmailCasoDeUso {
     const acesso = await this.emissor.emitir(reivindicacoesDoToken(conta, nova), agora);
     return {
       tipo: 'verificado',
+      cliente: nova.cliente,
       sessao: {
         tokenAcesso: acesso.token,
         expiraEm: acesso.expiraEm,

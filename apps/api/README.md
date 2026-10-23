@@ -15,6 +15,8 @@ pnpm --filter api worker    # worker; precisa do banco migrado e do pg-boss migr
 
 Dados de exemplo: `pnpm --filter api seed`, com o banco migrado. Grava a versão 1.0 dos Termos de Uso e da Política de Privacidade, marcadas "RASCUNHO, revisar com advogado", como o dono dos schemas (`DATABASE_URL_MIGRACAO`), porque a aplicação só lê documentos legais. Só roda com `NODE_ENV=development` ou `test` (recusa `production` e ambiente sem `NODE_ENV`); rodar de novo não muda o que já foi gravado.
 
+Conta admin: `pnpm --filter api seed:admin` (`src/cli/seed-admin.ts`) cria a conta admin sem senha; é o único caminho que concede `admin` (nenhuma rota concede) e, ao contrário do `seed`, roda em produção, na máquina da API. Lê da entrada padrão, uma linha cada, o e-mail, o e-mail de novo, o nome e o celular (nada pessoal por argumento); depois do primeiro admin, exige `--operador <id da sua conta admin>`, gravado na auditoria. Sobe o mesmo `AppModule` da API, sem HTTP. O código para definir a senha vai para o e-mail da conta; no primeiro login no painel, ela configura o app autenticador.
+
 Os dois compilam com `tsc` e rodam `node dist/...` com `--env-file-if-exists=.env`. Rodar direto o TypeScript (por exemplo com `tsx`) **não funciona**: o `tsx` não emite os metadados de decorator e a injeção de dependência do Nest quebra.
 
 ```bash
@@ -105,7 +107,10 @@ cli/migrar-pg-boss.ts       passo de migração do pg-boss, checagem de schemas 
 cli/seed.ts                 documentos legais de rascunho para desenvolvimento e teste (recusa produção)
 compartilhado/
   config/        ambiente validado com zod
-  http/          configurarAplicacao, filtro de erros (Problem Details), pipe de validação, id da requisição
+  autenticacao/  porta VerificadorDeAcesso (a Identidade implementa; a guarda global a consulta)
+  http/          configurarAplicacao, filtro de erros (Problem Details), pipe de validação, id da requisição,
+                 limites por rota (limite-por-rota.guard.ts)
+  http/autenticacao/  guarda global Autenticado, @Publico(), @Perfis(), @ExigeMfa(), @ContaAtual()
   log/           logger pino e redator de dado sensível
   saude/         /v1/saude e /v1/saude/pronto
   transacao/     porta UnidadeDeTrabalho
@@ -120,10 +125,13 @@ modulos/<contexto>/{dominio,aplicacao,infra,http}
 modulos/identidade/
   dominio/       Conta, Email, Telefone, Sessao, BloqueioDeLogin, CodigoDeVerificacao,
                  DesafioDeSegundoFator e as portas dos repositórios (repositorios.ts)
-  aplicacao/     eventos de Identidade e portas de serviço (hasher, cifrador, JWT, TOTP...)
-  http/          por enquanto só a lista pública de senhas comuns (senha-fora-da-lista-publica.ts)
-                 e o dado gerado dela (dados/senhas-comuns-publicas.ts)
-                 (infra/ e o resto de http/ chegam nas próximas etapas do plano 01b)
+  aplicacao/     casos de uso, assinantes, tarefas diárias, eventos e portas de serviço
+                 (hasher, cifrador, JWT, TOTP...)
+  infra/         repositórios Prisma, cripto, modelos de e-mail e o VerificadorDeAcesso
+  http/          controllers (contas, sessões, senha, segundo fator), cookie do painel
+                 (sessao-no-http.ts), limites das rotas (limites.ts) e a lista pública de senhas
+                 comuns (senha-fora-da-lista-publica.ts, dados/senhas-comuns-publicas.ts)
+  identidade.module.ts, index.ts   módulo Nest e a API pública do módulo
 ```
 
 Fakes dos testes de unidade, fora do build (código de produção não importa de `test/`, regra `producao-nao-importa-test`):
@@ -149,14 +157,16 @@ test/fakes/identidade/      repositórios em memória (criarIdentidadeEmMemoria)
 - **Rotação e revogação da sessão.** A rotação (`gravarRotacao`) é um UPDATE condicionado ao token antigo e à sessão não revogada (`WHERE id = $1 AND token_hash = <trocado> AND revogada_em IS NULL`) que muda só as colunas da rotação. Com 0 linhas, devolve `false`, não grava o histórico, e o caso de uso relê a sessão. A revogação (`atualizar`, `revogarDaFamilia`, `revogarDaConta`) muda só as colunas da revogação, e `atualizar` usa `coalesce`, então a primeira revogação gravada nunca volta a `NULL`. Assim, uma renovação que leu a sessão antes do logout, da redefinição de senha ou da revogação por reuso não a ressuscita, e um logout com leitura velha não rebaixa o prazo nem o par novo de uma rotação recente.
 - **Reuso de token de renovação.** Todo token trocado fica em `tokens_de_renovacao_usados` até a sessão sumir. Apresentar um token antigo da família, não só o anterior imediato, revoga a família inteira. A tolerância de 60 s vale só para o anterior imediato.
 - **Fakes.** `UnidadeDeTrabalhoFalsa` guarda a unidade num AsyncLocalStorage, como a real: duas unidades concorrentes são independentes, e a que falha desfaz só o que gravou. `travar` imita o `FOR UPDATE`, sem detectar deadlock, então trave sempre na mesma ordem. Os repositórios em memória imitam as restrições do banco que os casos de uso sentem.
-- **Lista pública de senhas comuns.** `src/modulos/identidade/http/senha-fora-da-lista-publica.ts` aplica, além das listas escritas à mão do `@bairrin/contratos`, uma lista pública de senhas comuns. É dado de terceiros e existe só na API, que é a autoridade: painel e apps não a carregam. A etapa 16 aplica `comSenhaForaDaListaPublica` em `criarContaSchema` (`senha`) e em `redefinirSenhaSchema` (`novaSenha`). Limitação do zod 4.6.7: a regra é do corpo, e o zod a pula quando outro campo tem um erro que encerra a validação (e-mail inválido, por exemplo). Nesse caso, a recusa da lista pública só aparece no envio seguinte.
+- **Lista pública de senhas comuns.** `src/modulos/identidade/http/senha-fora-da-lista-publica.ts` aplica, além das listas escritas à mão do `@bairrin/contratos`, uma lista pública de senhas comuns. É dado de terceiros e existe só na API, que é a autoridade: painel e apps não a carregam. As rotas de cadastro e de redefinição aplicam `comSenhaForaDaListaPublica` em `criarContaSchema` (`senha`) e em `redefinirSenhaSchema` (`novaSenha`); rota nova que grave senha nova também precisa dela. Limitação do zod 4.6.7: a regra é do corpo, e o zod a pula quando outro campo tem um erro que encerra a validação (e-mail inválido, por exemplo). Nesse caso, a recusa da lista pública só aparece no envio seguinte.
 - **Dado gerado.** `http/dados/senhas-comuns-publicas.ts` sai de `node scripts/gerar-senhas-comuns.mjs`, rodado à mão, e nunca é editado direto. O roteiro está no README do `@bairrin/contratos`. Fontes e licenças, com aviso no cabeçalho do arquivo: SecLists (MIT), nomes ("Fonte: IBGE") e palavras do OpenSubtitles (ODC-BY).
 
 ### Comportamento HTTP
 
-- Erro em Problem Details (`application/problem+json`): `type`, `title`, `status`, `codigo`, `campos[{campo, codigo, motivo}]` e `idRequisicao`. Erro inesperado vira 500 genérico, sem pilha nem mensagem.
+- Erro em Problem Details (`application/problem+json`): `type`, `title`, `status`, `codigo`, `campos[{campo, codigo, motivo}]` (no máximo 20 itens; num objeto, os campos declarados vêm antes das chaves desconhecidas) e `idRequisicao`. Erro inesperado vira 500 genérico, sem pilha nem mensagem.
 - `X-Request-Id` gerado sempre no servidor. `Cache-Control: no-store` por padrão. Helmet. CORS por lista de origens, com credenciais.
-- Corpo JSON até 100 KB (413 acima). Limite global de 300 requisições por minuto por IP, em memória (uma instância).
+- Corpo JSON até 100 KB (413 acima). Limite global de 300 requisições por minuto por IP, em memória (uma instância). Rotas sensíveis têm limites próprios por IP, por conta ou por e-mail (`@LimitarRota`, valores em `modulos/identidade/http/limites.ts`), conferidos antes da validação do corpo, sempre os por IP primeiro (um IP bloqueado não gasta o contador de nenhum e-mail); IPv6 conta pelo /64. Excesso: 429 com `Retry-After`.
+- Autenticação: toda rota exige `Authorization: Bearer <token de acesso>`, menos as marcadas com `@Publico()` (guarda global `Autenticado`); em `/v1/admin`, `@Publico()` é ignorado. Só a guarda responde 401 nas rotas autenticadas. Em `/v1/admin`, a conta precisa de `admin` com segundo fator e a sessão do token é conferida a cada requisição; sem isso, 403 com log só do id da conta. Use `@Perfis('admin')` e `@ExigeMfa()` nos controllers de admin.
+- Painel: o token de renovação vai só no cookie `bairrin_renovacao` (`HttpOnly; Secure; SameSite=Strict`, `Path=/v1/sessoes/renovacao`). Renovação e logout pelo cookie exigem `X-Cliente: painel` e a origem do painel na lista do CORS.
 - `trust proxy` de 2 saltos só em produção, para o Fly; esse valor ainda precisa ser confirmado num Fly real.
 - Log em JSON, sem corpo de requisição, sem query na URL, com redator de chaves sensíveis. A mensagem de erro de biblioteca de banco não é registrada.
 
@@ -183,5 +193,4 @@ pnpm --filter api test:integracao -- outbox email-smtp   # só os arquivos que c
 
 ## Futuro
 
-- `seed:admin` (`src/cli/seed-admin.ts`, plano 01b, etapa 13) cria a conta admin sem senha; ao contrário do `seed`, roda em produção, por CLI. Lê da entrada padrão, uma linha cada, o e-mail, o e-mail de novo, o nome e o celular (nada pessoal por argumento); depois do primeiro admin, exige `--operador <id da sua conta admin>`, gravado na auditoria. Só funciona depois que a etapa 16 registrar `CriarAdminCasoDeUso` no `IdentidadeModule`.
 - `/v1/docs` (OpenAPI gerado dos esquemas) e `GET /v1/app/versao-minima`.

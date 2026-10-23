@@ -554,7 +554,10 @@ export function criarClienteAutenticado(opcoes: OpcoesDoClienteAutenticado): Cli
    * que ficou aqui reabre a sessão; `false` em rede, tempo, 429, 5xx ou 2xx
    * fora do contrato.
    * - Painel: `DELETE /v1/sessoes/renovacao` pelo cookie e `X-Cliente: painel`,
-   *   sem Bearer e sem renovar antes; a API responde 204 sempre.
+   *   sem Bearer e sem renovar antes. A API responde 204 com a origem do
+   *   painel, também sem cookie ou com cookie desconhecido; 403 sem
+   *   `X-Cliente: painel` ou fora da origem, sem revogar: o 403 não confirma e
+   *   mantém a marca de logout pendente.
    * - Apps: `DELETE /v1/sessoes/atual` com o Bearer. Se a API recusar o token
    *   de acesso, renova com o de renovação (o par trocado vai para
    *   `aoTrocarPar`) e repete; renovação recusada conta como revogada.

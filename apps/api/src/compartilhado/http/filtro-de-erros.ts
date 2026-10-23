@@ -1,12 +1,20 @@
 // Filtro global: toda exceção vira Problem Details (RFC 9457) com `codigo` e
 // `idRequisicao`. Nunca devolve pilha nem a mensagem da exceção: o texto da
 // resposta sai só de `ERROS` (`@bairrin/contratos`).
+//
+// O 400 de validação leva no máximo `MAXIMO_DE_CAMPOS_NO_PROBLEMA` itens em
+// `campos` (Q30): o zod dá um item por chave desconhecida, e um corpo de
+// 100 KB cheio de chaves curtas viraria uma resposta de ~750 KB. O corte
+// fica aqui, a saída de todo 400 da API, e mantém os primeiros itens, que
+// são os dos campos declarados (o zod lista as chaves desconhecidas de um
+// objeto depois dos campos dele).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException } from '@nestjs/common';
 import {
   criarProblema,
   type CampoComErro,
   type CodigoDeErro,
+  ERROS,
   type Problema,
   TIPO_DE_CONTEUDO_PROBLEMA,
 } from '@bairrin/contratos';
@@ -26,11 +34,38 @@ const CODIGO_POR_STATUS: Readonly<Record<number, CodigoDeErro>> = {
   503: 'indisponivel',
 };
 
+/** Maior número de itens em `campos` no Problema de validação (Q30). */
+export const MAXIMO_DE_CAMPOS_NO_PROBLEMA = 20;
+
 export interface Classificacao {
   codigo: CodigoDeErro;
   campos?: CampoComErro[];
   /** Erro de programação ou de infraestrutura: vai para o log com a pilha. */
   inesperado: boolean;
+  /** Segundos para o cabeçalho `Retry-After` (429 do freio, CA-04). */
+  esperaEmSegundos?: number;
+}
+
+/**
+ * Resposta de erro escolhida pela rota com um código de `ERROS` que o status
+ * sozinho não diz (`sem_acesso_painel`, S23) ou com `Retry-After` (o freio do
+ * login, da redefinição, da verificação de e-mail e do segundo fator, CA-04).
+ * O texto da resposta continua saindo só de `ERROS`.
+ */
+export class ErroComCodigo extends HttpException {
+  readonly esperaEmSegundos?: number;
+
+  constructor(
+    readonly codigo: CodigoDeErro,
+    opcoes: { readonly esperaEmSegundos?: number } = {},
+  ) {
+    super(ERROS[codigo].title, ERROS[codigo].status);
+    this.name = 'ErroComCodigo';
+    if (opcoes.esperaEmSegundos !== undefined) {
+      // Pelo menos 1 s: `Retry-After: 0` faria o cliente repetir na hora.
+      this.esperaEmSegundos = Math.max(1, Math.ceil(opcoes.esperaEmSegundos));
+    }
+  }
 }
 
 /**
@@ -56,7 +91,20 @@ function ehErroDoLeitorDeCorpo(erro: unknown): erro is Error & { status: number 
 /** Decide o código do Problema. Nunca lê a mensagem da exceção. */
 export function classificarExcecao(excecao: unknown): Classificacao {
   if (excecao instanceof ErroDeValidacao) {
-    return { codigo: 'validacao', campos: excecao.campos, inesperado: false };
+    return {
+      codigo: 'validacao',
+      campos: excecao.campos.slice(0, MAXIMO_DE_CAMPOS_NO_PROBLEMA),
+      inesperado: false,
+    };
+  }
+  if (excecao instanceof ErroComCodigo) {
+    return {
+      codigo: excecao.codigo,
+      inesperado: false,
+      ...(excecao.esperaEmSegundos === undefined
+        ? {}
+        : { esperaEmSegundos: excecao.esperaEmSegundos }),
+    };
   }
   if (excecao instanceof HttpException) {
     const status = excecao.getStatus();
@@ -87,7 +135,7 @@ export class FiltroDeErros implements ExceptionFilter {
     const req = http.getRequest<IncomingMessage & { log?: unknown }>();
     const res = http.getResponse<ServerResponse & { err?: Error }>();
     const idRequisicao = obterIdRequisicao(req, res);
-    const { codigo, campos, inesperado } = classificarExcecao(excecao);
+    const { codigo, campos, inesperado, esperaEmSegundos } = classificarExcecao(excecao);
     const erro = inesperado ? comoErro(excecao) : undefined;
     // Com o pino-http ativo, o erro vai em `res.err` e sai no registro de
     // conclusão da requisição (uma linha só).
@@ -106,6 +154,7 @@ export class FiltroDeErros implements ExceptionFilter {
     });
     res.statusCode = problema.status;
     if (req.log === undefined) this.registrarSemLogDaRequisicao(req, res, idRequisicao, erro);
+    if (esperaEmSegundos !== undefined) res.setHeader('Retry-After', String(esperaEmSegundos));
     res.setHeader('Content-Type', `${TIPO_DE_CONTEUDO_PROBLEMA}; charset=utf-8`);
     res.end(JSON.stringify(problema));
   }

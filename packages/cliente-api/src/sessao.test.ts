@@ -927,6 +927,8 @@ describe('logout pendente no painel (S80)', () => {
     ['sem rede', () => Promise.reject(new TypeError('Network request failed'))],
     ['com 500', () => json(500, { ...PROBLEMA_401, status: 500, codigo: 'erro_interno' })],
     ['com 429', () => json(429, { ...PROBLEMA_401, status: 429, codigo: 'muitas_requisicoes' })],
+    // 403 fora da origem do painel: a API não revogou, então a marca fica (R1).
+    ['com 403', () => json(403, { ...PROBLEMA_401, status: 403, codigo: 'sem_permissao' })],
   ])(
     'logout %s: diz que não revogou, guarda a marca sem token e limpa o aparelho',
     async (_nome, falha: () => RespostaMinima | Promise<RespostaMinima>) => {

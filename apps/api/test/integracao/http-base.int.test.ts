@@ -1,21 +1,35 @@
 // Integração da base HTTP (CA-F3): a aplicação montada como no `main.ts`,
 // mais rotas de teste para validação, erro inesperado, log e IP do cliente.
 // Não usa banco nem `.env`: o ambiente é fictício e o log vai para a memória.
+// Desde o 01b (etapa 16), também as guardas globais (`Autenticado`, limites
+// por rota) e as guardas de perfil e de segundo fator, com o
+// `VerificadorDeAcesso` trocado por um falso (sem banco).
 import { randomBytes } from 'node:crypto';
 import { Body, Controller, Get, Post, Req } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import { objetoEstrito, problemaSchema, z } from '@bairrin/contratos';
+import { CABECALHO_DO_CLIENTE, objetoEstrito, problemaSchema, z } from '@bairrin/contratos';
 import type { Request } from 'express';
 import { PinoLogger } from 'nestjs-pino';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppModule, type LimiteDeRequisicoes } from '../../src/app.module.ts';
+import {
+  type ContaAutenticada,
+  type OpcoesDaVerificacao,
+  VerificadorDeAcesso,
+} from '../../src/compartilhado/autenticacao/verificador-de-acesso.ts';
 import { carregarAmbiente } from '../../src/compartilhado/config/ambiente.ts';
+import { TAMANHO_MAXIMO_DO_TOKEN_DE_ACESSO } from '../../src/compartilhado/http/autenticacao/autenticado.guard.ts';
+import { ContaAtual } from '../../src/compartilhado/http/autenticacao/conta-atual.decorator.ts';
+import { ExigeMfa } from '../../src/compartilhado/http/autenticacao/exige-mfa.guard.ts';
+import { Perfis } from '../../src/compartilhado/http/autenticacao/perfis.guard.ts';
+import { Publico } from '../../src/compartilhado/http/autenticacao/publico.decorator.ts';
 import {
   configurarAplicacao,
   OPCOES_DA_APLICACAO,
 } from '../../src/compartilhado/http/configurar-aplicacao.ts';
+import { LimitarRota } from '../../src/compartilhado/http/limite-por-rota.guard.ts';
 import { ValidacaoZodPipe } from '../../src/compartilhado/http/validacao-zod.pipe.ts';
 
 const ORIGEM_DO_PAINEL = 'https://painel.bairrin.com.br';
@@ -26,6 +40,7 @@ const cadastroSchema = objetoEstrito({
   idade: z.number().int().min(18),
 });
 
+@Publico()
 @Controller('teste')
 class RotasDeTeste {
   constructor(private readonly logger: PinoLogger) {}
@@ -64,6 +79,111 @@ class RotasDeTeste {
   }
 }
 
+/** Rota autenticada (sem `@Publico()`): devolve a conta que a guarda pôs na requisição. */
+@Controller('teste/protegida')
+class RotasProtegidas {
+  @Get()
+  quem(@ContaAtual() conta: ContaAutenticada) {
+    return { contaId: conta.contaId, sid: conta.sid };
+  }
+}
+
+/** Rotas de admin como as do painel (S7): perfil `admin` e segundo fator. */
+@Perfis('admin')
+@ExigeMfa()
+@Controller('v1/admin/teste')
+class RotasDeAdminDeTeste {
+  @Get()
+  ver(@ContaAtual() conta: ContaAutenticada) {
+    return { contaId: conta.contaId };
+  }
+}
+
+/** Rota de admin que esqueceu `@Perfis` e `@ExigeMfa`: a guarda global segura pelo prefixo. */
+@Controller('v1')
+class RotaDeAdminEsquecida {
+  @Get('admin/esquecida')
+  ver() {
+    return { ok: true };
+  }
+}
+
+/** Rota de admin marcada `@Publico()` por engano: o prefixo vence (S110). */
+@Publico()
+@Controller('v1/admin/publica-por-engano')
+class RotaDeAdminPublicaPorEngano {
+  @Get()
+  ver() {
+    return { ok: true };
+  }
+}
+
+/**
+ * Declarada sem o `v1`: só fica sob `/v1/admin` com `setGlobalPrefix('v1')`,
+ * que os metadados do controller não mostram (S110).
+ */
+@Controller('admin/pelo-prefixo-global')
+class RotaDeAdminPeloPrefixoGlobal {
+  @Get()
+  ver() {
+    return { ok: true };
+  }
+}
+
+/** Limites por rota (etapa 16): por IP, por e-mail do corpo e por conta. */
+@Controller('teste/limitada')
+class RotasLimitadas {
+  // O e-mail vem antes no decorador de propósito: a guarda confere o IP
+  // primeiro mesmo assim (S109).
+  @Publico()
+  @Post('por-ip-e-email')
+  @LimitarRota(
+    { nome: 'email', por: 'email', limite: 2, janelaEmMs: 60_000 },
+    { nome: 'ip', por: 'ip', limite: 3, janelaEmMs: 60_000 },
+  )
+  porIpEEmail(@Body() _corpo: unknown) {
+    return { ok: true };
+  }
+
+  @Post('por-conta')
+  @LimitarRota({ nome: 'conta', por: 'conta', limite: 1, janelaEmMs: 60_000 })
+  porConta() {
+    return { ok: true };
+  }
+}
+
+/** Tokens que o verificador falso aceita, com a conta de cada um. */
+const CONTA_COMUM: ContaAutenticada = {
+  contaId: '11111111-1111-4111-8111-111111111111',
+  sid: '21111111-1111-4111-8111-111111111111',
+  perfis: ['consumidor'],
+  mfa: false,
+  emailVerificado: true,
+};
+const CONTA_ADMIN: ContaAutenticada = {
+  contaId: '33333333-3333-4333-8333-333333333333',
+  sid: '43333333-3333-4333-8333-333333333333',
+  perfis: ['consumidor', 'admin'],
+  mfa: true,
+  emailVerificado: true,
+};
+const TOKENS: Readonly<Record<string, ContaAutenticada>> = {
+  'token.comum': CONTA_COMUM,
+  'token.admin': CONTA_ADMIN,
+  'token.admin-sem-mfa': { ...CONTA_ADMIN, mfa: false },
+  'token.mfa-sem-admin': { ...CONTA_COMUM, mfa: true },
+};
+
+/** `VerificadorDeAcesso` sem banco: aceita só os `TOKENS` e anota cada chamada. */
+class VerificadorDeAcessoFalso extends VerificadorDeAcesso {
+  readonly chamadas: { token: string; opcoes: OpcoesDaVerificacao }[] = [];
+
+  override verificar(token: string, opcoes: OpcoesDaVerificacao) {
+    this.chamadas.push({ token, opcoes });
+    return Promise.resolve(TOKENS[token] ?? null);
+  }
+}
+
 /** Valores fictícios, nunca lidos de `.env`. */
 function ambiente(producao = false) {
   const chave = () => randomBytes(32).toString('base64');
@@ -97,9 +217,12 @@ afterEach(async () => {
   aberta = undefined;
 });
 
-async function subir(opcoes: { producao?: boolean; limite?: LimiteDeRequisicoes } = {}) {
+async function subir(
+  opcoes: { producao?: boolean; limite?: LimiteDeRequisicoes; prefixoGlobal?: string } = {},
+) {
   linhas.length = 0;
   const amb = ambiente(opcoes.producao);
+  const verificador = new VerificadorDeAcessoFalso();
   const modulo = await Test.createTestingModule({
     imports: [
       AppModule.registrar({
@@ -108,14 +231,31 @@ async function subir(opcoes: { producao?: boolean; limite?: LimiteDeRequisicoes 
         ...(opcoes.limite ? { limiteDeRequisicoes: opcoes.limite } : {}),
       }),
     ],
-    controllers: [RotasDeTeste],
-  }).compile();
+    controllers: [
+      RotasDeTeste,
+      RotasProtegidas,
+      RotasDeAdminDeTeste,
+      RotaDeAdminEsquecida,
+      RotaDeAdminPublicaPorEngano,
+      RotaDeAdminPeloPrefixoGlobal,
+      RotasLimitadas,
+    ],
+  })
+    .overrideProvider(VerificadorDeAcesso)
+    .useValue(verificador)
+    .compile();
   const app = modulo.createNestApplication<NestExpressApplication>(OPCOES_DA_APLICACAO);
   configurarAplicacao(app, amb);
+  if (opcoes.prefixoGlobal !== undefined) app.setGlobalPrefix(opcoes.prefixoGlobal);
   await app.init();
   aberta = app;
   const registros = () => linhas.map((linha) => JSON.parse(linha) as Record<string, unknown>);
-  return { http: request(app.getHttpServer()), textoDoLog: () => linhas.join('\n'), registros };
+  return {
+    http: request(app.getHttpServer()),
+    textoDoLog: () => linhas.join('\n'),
+    registros,
+    verificador,
+  };
 }
 
 function problema(corpo: unknown) {
@@ -214,6 +354,26 @@ describe('validação do corpo', () => {
       .post('/teste/cadastro')
       .send({ nome: 'x'.repeat(99 * 1024), idade: 30 })
       .expect(201);
+  });
+
+  it('corpo de ~99 KB só de chaves desconhecidas → 400 com no máximo 20 campos (Q30)', async () => {
+    const { http } = await subir();
+    const corpo: Record<string, number> = { idade: 30 };
+    // Cada chave `"kN":1,` soma o tamanho do nome mais 5 caracteres ao JSON.
+    for (let indice = 0, tamanho = 10; tamanho < 99 * 1024; indice += 1) {
+      corpo[`k${indice}`] = 1;
+      tamanho += `k${indice}`.length + 5;
+    }
+    const resposta = await http.post('/teste/cadastro').send(corpo).expect(400);
+    const { campos } = problema(resposta.body);
+    expect(campos).toHaveLength(20);
+    expect(campos?.[0]).toEqual({
+      campo: 'nome',
+      codigo: 'obrigatorio',
+      motivo: 'Campo obrigatório.',
+    });
+    expect(campos?.slice(1).every(({ codigo }) => codigo === 'desconhecido')).toBe(true);
+    expect(resposta.text.length).toBeLessThan(4 * 1024);
   });
 });
 
@@ -354,6 +514,227 @@ describe('logs', () => {
   });
 });
 
+describe('autenticação global (S7, S8)', () => {
+  it('rota sem `@Publico()` exige token: ausente, mal formado ou desconhecido → 401 igual', async () => {
+    const { http, verificador } = await subir();
+    const semToken = await http.get('/teste/protegida').expect(401);
+    const malFormado = await http
+      .get('/teste/protegida')
+      .set('Authorization', 'Bearer token com espaço')
+      .expect(401);
+    const outroEsquema = await http
+      .get('/teste/protegida')
+      .set('Authorization', 'Basic dXN1YXJpbzpzZW5oYQ==')
+      .expect(401);
+    const desconhecido = await http
+      .get('/teste/protegida')
+      .set('Authorization', 'Bearer token.desconhecido')
+      .expect(401);
+    for (const resposta of [semToken, malFormado, outroEsquema, desconhecido]) {
+      const { idRequisicao: _id, ...corpo } = problema(resposta.body);
+      expect(corpo).toEqual({
+        type: 'urn:bairrin:erro:nao_autenticado',
+        title: 'Autenticação necessária',
+        status: 401,
+        codigo: 'nao_autenticado',
+      });
+    }
+    // Só o token bem formado chega ao verificador.
+    expect(verificador.chamadas.map(({ token }) => token)).toEqual(['token.desconhecido']);
+  });
+
+  it('token acima do tamanho máximo é recusado antes de conferir a assinatura', async () => {
+    const { http, verificador } = await subir();
+    const grande = 'a'.repeat(TAMANHO_MAXIMO_DO_TOKEN_DE_ACESSO + 1);
+    await http.get('/teste/protegida').set('Authorization', `Bearer ${grande}`).expect(401);
+    expect(verificador.chamadas).toEqual([]);
+  });
+
+  it('token válido: a rota recebe a conta, e fora de /v1/admin a sessão não é conferida', async () => {
+    const { http, verificador } = await subir();
+    const resposta = await http
+      .get('/teste/protegida')
+      .set('Authorization', 'bearer token.comum')
+      .expect(200);
+    expect(resposta.body).toEqual({ contaId: CONTA_COMUM.contaId, sid: CONTA_COMUM.sid });
+    expect(verificador.chamadas).toEqual([
+      { token: 'token.comum', opcoes: { conferirSessao: false } },
+    ]);
+  });
+
+  it('/v1/saude continua pública', async () => {
+    const { http, verificador } = await subir();
+    await http.get('/v1/saude').expect(200);
+    expect(verificador.chamadas).toEqual([]);
+  });
+
+  it('em /v1/admin: admin com segundo fator passa, e a sessão do `sid` é conferida (S8)', async () => {
+    const { http, verificador } = await subir();
+    const resposta = await http
+      .get('/v1/admin/teste')
+      .set('Authorization', 'Bearer token.admin')
+      .expect(200);
+    expect(resposta.body).toEqual({ contaId: CONTA_ADMIN.contaId });
+    expect(verificador.chamadas).toEqual([
+      { token: 'token.admin', opcoes: { conferirSessao: true } },
+    ]);
+  });
+
+  it('em /v1/admin: sem admin ou sem segundo fator → 403 com log só do id (CA-08)', async () => {
+    const { http, textoDoLog, registros } = await subir();
+    for (const token of ['token.comum', 'token.admin-sem-mfa', 'token.mfa-sem-admin']) {
+      const resposta = await http
+        .get('/v1/admin/teste')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+      expect(problema(resposta.body).codigo).toBe('sem_permissao');
+    }
+    await vi.waitFor(() => {
+      expect(registros().filter((r) => r['msg'] === 'acesso negado a rota de admin')).toHaveLength(
+        3,
+      );
+    });
+    const negados = registros().filter((r) => r['msg'] === 'acesso negado a rota de admin');
+    expect(negados.map((r) => r['contaId'])).toEqual([
+      CONTA_COMUM.contaId,
+      CONTA_ADMIN.contaId,
+      CONTA_COMUM.contaId,
+    ]);
+    expect(textoDoLog()).not.toMatch(/token\.(comum|admin)/);
+  });
+
+  it('rota de /v1/admin sem `@Perfis` nem `@ExigeMfa` continua só de admin com segundo fator', async () => {
+    const { http, verificador } = await subir();
+    await http.get('/v1/admin/esquecida').expect(401);
+    await http.get('/v1/admin/esquecida').set('Authorization', 'Bearer token.comum').expect(403);
+    await http
+      .get('/v1/admin/esquecida')
+      .set('Authorization', 'Bearer token.admin-sem-mfa')
+      .expect(403);
+    await http.get('/v1/admin/esquecida').set('Authorization', 'Bearer token.admin').expect(200);
+    expect(verificador.chamadas.every(({ opcoes }) => opcoes.conferirSessao)).toBe(true);
+  });
+
+  it('o prefixo vale pelo caminho declarado, também com a URL em maiúsculas', async () => {
+    const { http, verificador } = await subir();
+    await http.get('/V1/ADMIN/teste').set('Authorization', 'Bearer token.comum').expect(403);
+    await http.get('/v1/Admin/Esquecida').set('Authorization', 'Bearer token.comum').expect(403);
+    expect(verificador.chamadas.map(({ opcoes }) => opcoes.conferirSessao)).toEqual([true, true]);
+  });
+
+  it('`@Publico()` numa rota de /v1/admin não a abre: sem token, 401 (S110)', async () => {
+    const { http, verificador } = await subir();
+    await http.get('/v1/admin/publica-por-engano').expect(401);
+    await http.get('/V1/Admin/Publica-Por-Engano').expect(401);
+    await http
+      .get('/v1/admin/publica-por-engano')
+      .set('Authorization', 'Bearer token.comum')
+      .expect(403);
+    await http
+      .get('/v1/admin/publica-por-engano')
+      .set('Authorization', 'Bearer token.admin')
+      .expect(200);
+    expect(verificador.chamadas.map(({ opcoes }) => opcoes.conferirSessao)).toEqual([true, true]);
+  });
+
+  it('o prefixo vale também pela rota casada, com o `setGlobalPrefix` (S110)', async () => {
+    const { http, verificador } = await subir({ prefixoGlobal: 'v1' });
+    await http.get('/v1/admin/pelo-prefixo-global').expect(401);
+    await http
+      .get('/v1/admin/pelo-prefixo-global')
+      .set('Authorization', 'Bearer token.comum')
+      .expect(403);
+    await http
+      .get('/V1/ADMIN/pelo-prefixo-global')
+      .set('Authorization', 'Bearer token.admin-sem-mfa')
+      .expect(403);
+    await http
+      .get('/v1/admin/pelo-prefixo-global')
+      .set('Authorization', 'Bearer token.admin')
+      .expect(200);
+    // Fora do prefixo, a mesma guarda não confere a sessão.
+    await http.get('/v1/teste/protegida').set('Authorization', 'Bearer token.comum').expect(200);
+    expect(verificador.chamadas.map(({ opcoes }) => opcoes.conferirSessao)).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+  });
+});
+
+describe('limites por rota (S14, S82)', () => {
+  it('por e-mail (normalizado) e por IP, com 429 e Retry-After', async () => {
+    const { http } = await subir();
+    const rota = '/teste/limitada/por-ip-e-email';
+    await http.post(rota).send({ email: 'Fulano@Exemplo.com' }).expect(201);
+    await http.post(rota).send({ email: ' fulano@exemplo.com ' }).expect(201);
+    // Terceira do mesmo e-mail: 429 pelo limite por e-mail (a terceira do IP
+    // ainda cabe no limite dele, 3).
+    const porEmail = await http.post(rota).send({ email: 'FULANO@exemplo.com' }).expect(429);
+    expect(problema(porEmail.body).codigo).toBe('limite_excedido');
+    expect(porEmail.headers['retry-after']).toMatch(/^[1-9]\d*$/);
+    // O IP é conferido antes (S109): a recusa por e-mail também contou nele, e
+    // um e-mail novo já cai no limite por IP.
+    const porIp = await http.post(rota).send({ email: 'outro@exemplo.com' }).expect(429);
+    expect(porIp.headers['retry-after']).toMatch(/^[1-9]\d*$/);
+  });
+
+  it('IP bloqueado não gasta o contador do e-mail: o mesmo e-mail, de outro IP, ainda passa (S109)', async () => {
+    const { http } = await subir({ producao: true });
+    const rota = '/teste/limitada/por-ip-e-email';
+    const de = (cliente: string) =>
+      http.post(rota).set('X-Forwarded-For', `${cliente}, 198.51.100.1`);
+    for (const n of [1, 2, 3]) {
+      await de('203.0.113.1')
+        .send({ email: `lote${n}@exemplo.com` })
+        .expect(201);
+    }
+    // Com o IP bloqueado, as tentativas com o e-mail novo não chegam ao limite por e-mail (2).
+    for (let vez = 0; vez < 3; vez += 1) {
+      await de('203.0.113.1').send({ email: 'novo@exemplo.com' }).expect(429);
+    }
+    await de('203.0.113.2').send({ email: 'novo@exemplo.com' }).expect(201);
+    await de('203.0.113.3').send({ email: 'novo@exemplo.com' }).expect(201);
+    await de('203.0.113.4').send({ email: 'novo@exemplo.com' }).expect(429);
+  });
+
+  it('corpo sem e-mail válido não conta no limite por e-mail, mas conta no por IP', async () => {
+    const { http } = await subir();
+    const rota = '/teste/limitada/por-ip-e-email';
+    await http.post(rota).send({ email: 'não é e-mail' }).expect(201);
+    await http.post(rota).send({}).expect(201);
+    await http.post(rota).send({ email: 'fulano@exemplo.com' }).expect(201);
+    await http.post(rota).send({ email: 'fulano@exemplo.com' }).expect(429);
+  });
+
+  it('em produção, o IPv6 conta pelo /64 e o IPv4 pelo endereço', async () => {
+    const { http } = await subir({ producao: true });
+    const rota = '/teste/limitada/por-ip-e-email';
+    const via = (cliente: string) => `${cliente}, 198.51.100.1`;
+    for (const sufixo of ['1', '2', 'abcd:1234']) {
+      await http
+        .post(rota)
+        .set('X-Forwarded-For', via(`2001:db8:1:2::${sufixo}`))
+        .send({})
+        .expect(201);
+    }
+    // Quarta do mesmo /64, com outro sufixo: recusada.
+    await http.post(rota).set('X-Forwarded-For', via('2001:db8:1:2:ffff::9')).send({}).expect(429);
+    // Outro /64 e outro IPv4 seguem livres.
+    await http.post(rota).set('X-Forwarded-For', via('2001:db8:1:3::1')).send({}).expect(201);
+    await http.post(rota).set('X-Forwarded-For', via('203.0.113.9')).send({}).expect(201);
+  });
+
+  it('por conta: conta a conta autenticada; outra conta tem o próprio limite', async () => {
+    const { http } = await subir();
+    const rota = '/teste/limitada/por-conta';
+    await http.post(rota).set('Authorization', 'Bearer token.comum').expect(201);
+    await http.post(rota).set('Authorization', 'Bearer token.comum').expect(429);
+    await http.post(rota).set('Authorization', 'Bearer token.admin').expect(201);
+  });
+});
+
 describe('CORS', () => {
   it('aceita a origem do painel, com credenciais', async () => {
     const { http } = await subir();
@@ -373,6 +754,36 @@ describe('CORS', () => {
       .set('Origin', 'https://malicioso.example')
       .set('Access-Control-Request-Method', 'POST');
     expect(previa.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('pré-verificação da renovação do painel aceita X-Cliente, POST e DELETE com credenciais (01b)', async () => {
+    const { http } = await subir();
+    for (const metodo of ['POST', 'DELETE']) {
+      const previa = await http
+        .options('/v1/sessoes/renovacao')
+        .set('Origin', ORIGEM_DO_PAINEL)
+        .set('Access-Control-Request-Method', metodo)
+        .set('Access-Control-Request-Headers', 'content-type, x-cliente')
+        .expect(204);
+      expect(previa.headers['access-control-allow-origin']).toBe(ORIGEM_DO_PAINEL);
+      expect(previa.headers['access-control-allow-credentials']).toBe('true');
+      const permitidos = String(previa.headers['access-control-allow-headers']).toLowerCase();
+      expect(permitidos.split(',').map((item) => item.trim())).toContain(
+        CABECALHO_DO_CLIENTE.toLowerCase(),
+      );
+      expect(String(previa.headers['access-control-allow-methods'])).toContain(metodo);
+    }
+  });
+
+  it('pré-verificação da renovação vinda de fora não recebe nenhum cabeçalho de CORS', async () => {
+    const { http } = await subir();
+    const previa = await http
+      .options('/v1/sessoes/renovacao')
+      .set('Origin', 'https://malicioso.example')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type, x-cliente');
+    const deCors = Object.keys(previa.headers).filter((nome) => nome.startsWith('access-control-'));
+    expect(deCors).toEqual([]);
   });
 
   it('nunca responde com `*`', async () => {

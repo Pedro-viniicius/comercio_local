@@ -642,12 +642,16 @@ describe('aplicação (bairrin_app) no schema identidade', () => {
         const apagada = await app.query('DELETE FROM identidade.contas WHERE id = $1', id);
         expect(apagada.rowCount).toBe(1);
 
+        // Só as linhas das contas deste teste: outros arquivos deixam linhas no mesmo banco.
         const { rows } = await app.query<{ conta: string; concedidoPor: string | null }>(
-          `SELECT conta_id AS conta, concedido_por AS "concedidoPor" FROM identidade.perfis_conta`,
+          `SELECT conta_id AS conta, concedido_por AS "concedidoPor" FROM identidade.perfis_conta
+         WHERE conta_id = ANY($1::uuid[])`,
+          [[CONTA_ID, OUTRA_CONTA_ID]],
         );
         expect(rows).toEqual([{ conta: OUTRA_CONTA_ID, concedidoPor: null }]);
         const { rows: historico } = await app.query(
-          'SELECT token_hash FROM identidade.tokens_de_renovacao_usados',
+          'SELECT token_hash FROM identidade.tokens_de_renovacao_usados WHERE sessao_id = $1',
+          [sessoes[0]?.id],
         );
         expect(historico).toEqual([]);
         return linhasDaConta(FILHAS_DA_CONTA);

@@ -195,6 +195,8 @@ describe('VerificarEmailCasoDeUso: código certo (CA-01)', () => {
       mfa: false,
       revogadaEm: null,
     });
+    // A camada HTTP decide pelo cliente se o token de renovação vai no corpo ou no cookie.
+    expect(resultado.cliente).toBe('app_consumidor');
     expect(resultado.sessao).toMatchObject({
       emailVerificado: true,
       expiraEm: new Date(AGORA.getTime() + SEGUNDOS_DO_TOKEN_DE_ACESSO * 1000),
@@ -211,6 +213,7 @@ describe('VerificarEmailCasoDeUso: código certo (CA-01)', () => {
       codigo: CODIGO_CERTO,
     });
 
+    expect(resultado).toMatchObject({ tipo: 'verificado', cliente: 'painel' });
     const claims = await reivindicacoes(resultado);
     expect(claims.mfa).toBe(false);
     expect(claims.perfis).toEqual(['consumidor']);

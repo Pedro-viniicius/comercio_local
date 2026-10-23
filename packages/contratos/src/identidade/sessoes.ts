@@ -81,14 +81,17 @@ export type ClienteDoApp = z.infer<typeof clienteDoAppSchema>;
  * ele só recusa engano. O painel manda o cookie e o cabeçalho `X-Cliente:
  * painel`, com corpo vazio (`corpoVazioSchema`). Respostas: 200 com
  * `sessaoSchema`; 400 com o corpo fora do contrato; 401 com a credencial
- * inválida, vencida, revogada ou reusada (nunca 5xx).
+ * inválida, vencida, revogada ou reusada (nunca 5xx); 403 com `X-Cliente:
+ * painel` fora da origem do painel (sem renovar).
  *
  * Logout, sem corpo nos dois sentidos. Apps: `DELETE /v1/sessoes/atual` com
  * o Bearer revoga a sessão inteira e responde 204, também se ela já estava
  * revogada (401 só da guarda, com o Bearer inválido). Painel: `DELETE
  * /v1/sessoes/renovacao` (público), com o cookie e `X-Cliente: painel`,
- * revoga a sessão do cookie, se houver, apaga o cookie e responde 204 sempre
- * (S80).
+ * revoga a sessão do cookie, se houver, apaga o cookie e responde 204 com a
+ * origem do painel, também sem cookie ou com cookie desconhecido (S80); 403
+ * sem `X-Cliente: painel` ou fora da origem do painel, sem revogar. O 403
+ * mantém a marca de logout pendente do `cliente-api`.
  */
 export const renovarSessaoSchema = objetoEstrito({
   tokenRenovacao: tokenSchema,

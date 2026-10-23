@@ -60,7 +60,7 @@ export const UM_MINUTO = 60_000;
 export const UM_DIA = 24 * 60 * UM_MINUTO;
 
 /** Chaves só de teste (32 bytes cada, diferentes entre si, como o `carregarAmbiente` exige). */
-const CHAVES = {
+export const CHAVES = {
   JWT_SEGREDO: Buffer.alloc(32, 1).toString('base64'),
   CHAVE_CIFRAGEM_DADOS: Buffer.alloc(32, 2).toString('base64'),
   CHAVE_HMAC: Buffer.alloc(32, 3).toString('base64'),

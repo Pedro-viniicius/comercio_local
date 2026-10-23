@@ -12,10 +12,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
-import { problemaSchema } from '@bairrin/contratos';
+import { camposDoErroZod, entrarSchema, problemaSchema } from '@bairrin/contratos';
 import type { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
-import { classificarExcecao, FiltroDeErros } from './filtro-de-erros.ts';
+import {
+  classificarExcecao,
+  ErroComCodigo,
+  FiltroDeErros,
+  MAXIMO_DE_CAMPOS_NO_PROBLEMA,
+} from './filtro-de-erros.ts';
 import { ErroDeValidacao } from './validacao-zod.pipe.ts';
 
 /** Erro como o do leitor de corpo do Express (`http-errors`). */
@@ -49,6 +54,19 @@ describe('classificarExcecao', () => {
       campos,
       inesperado: false,
     });
+  });
+
+  it('ErroComCodigo escolhe o código e leva a espera do freio (01b, etapa 16)', () => {
+    expect(classificarExcecao(new ErroComCodigo('sem_acesso_painel'))).toEqual({
+      codigo: 'sem_acesso_painel',
+      inesperado: false,
+    });
+    expect(
+      classificarExcecao(new ErroComCodigo('limite_excedido', { esperaEmSegundos: 59.2 })),
+    ).toEqual({ codigo: 'limite_excedido', inesperado: false, esperaEmSegundos: 60 });
+    // `Retry-After: 0` faria o cliente repetir na hora: no mínimo 1 s.
+    expect(new ErroComCodigo('limite_excedido', { esperaEmSegundos: 0 }).esperaEmSegundos).toBe(1);
+    expect(new ErroComCodigo('sem_acesso_painel').getStatus()).toBe(403);
   });
 
   it.each([
@@ -170,6 +188,68 @@ describe('FiltroDeErros', () => {
     filtro.catch(new ErroDeValidacao(campos), host);
     expect(resposta.statusCode).toBe(400);
     expect(JSON.parse(resposta.corpo ?? '')).toMatchObject({ codigo: 'validacao', campos });
+  });
+
+  it('corpo de ~100 KB com milhares de chaves desconhecidas: o 400 leva só os primeiros 20 campos (Q30)', () => {
+    // Chaves curtas até o limite do corpo (100 KB): uma por item de `campos` sem o corte.
+    const chaves: string[] = [];
+    let tamanho = 0;
+    while (tamanho < 100 * 1024 - 100) {
+      const chave = `k${chaves.length}`;
+      chaves.push(`"${chave}":1`);
+      tamanho += chave.length + 5;
+    }
+    const bruto = `{"email":"nao-e-email",${chaves.join(',')}}`;
+    const resultado = entrarSchema.safeParse(JSON.parse(bruto));
+    if (resultado.success) throw new Error('o corpo deveria ser recusado');
+    expect(camposDoErroZod(resultado.error).length).toBeGreaterThan(10_000);
+
+    const { filtro, host, resposta } = montar();
+    filtro.catch(new ErroDeValidacao(camposDoErroZod(resultado.error)), host);
+
+    expect(resposta.statusCode).toBe(400);
+    const problema = problemaSchema.parse(JSON.parse(resposta.corpo ?? ''));
+    expect(problema.campos).toHaveLength(MAXIMO_DE_CAMPOS_NO_PROBLEMA);
+    // Os campos declarados vêm primeiro, com o motivo em português (CA-13).
+    expect(problema.campos?.slice(0, 3)).toEqual([
+      { campo: 'email', codigo: 'invalido', motivo: 'Confira o e-mail: falta o @ ou o domínio' },
+      { campo: 'senha', codigo: 'obrigatorio', motivo: 'Campo obrigatório.' },
+      expect.objectContaining({ campo: 'cliente', codigo: 'invalido' }),
+    ]);
+    expect(problema.campos?.[3]).toEqual({
+      campo: 'k0',
+      codigo: 'desconhecido',
+      motivo: 'Campo desconhecido.',
+    });
+    expect(bruto.length).toBeGreaterThan(100 * 1024 - 200);
+    expect(resposta.corpo?.length).toBeLessThan(4 * 1024);
+  });
+
+  it('ErroDeValidacao com até 20 campos passa inteiro', () => {
+    const campos = Array.from({ length: MAXIMO_DE_CAMPOS_NO_PROBLEMA }, (_, indice) => ({
+      campo: `c${indice}`,
+      codigo: 'desconhecido' as const,
+      motivo: 'Campo desconhecido.',
+    }));
+    expect(classificarExcecao(new ErroDeValidacao(campos)).campos).toEqual(campos);
+    expect(
+      classificarExcecao(new ErroDeValidacao([...campos, { ...campos[0]!, campo: 'extra' }]))
+        .campos,
+    ).toEqual(campos);
+  });
+
+  it('ErroComCodigo responde com o código e, no freio, com Retry-After', () => {
+    const painel = montar();
+    painel.filtro.catch(new ErroComCodigo('sem_acesso_painel'), painel.host);
+    expect(painel.resposta.statusCode).toBe(403);
+    expect(JSON.parse(painel.resposta.corpo ?? '')).toMatchObject({ codigo: 'sem_acesso_painel' });
+    expect(painel.resposta.cabecalhos['retry-after']).toBeUndefined();
+
+    const freio = montar();
+    freio.filtro.catch(new ErroComCodigo('limite_excedido', { esperaEmSegundos: 300 }), freio.host);
+    expect(freio.resposta.statusCode).toBe(429);
+    expect(freio.resposta.cabecalhos['retry-after']).toBe('300');
+    expect(JSON.parse(freio.resposta.corpo ?? '')).toMatchObject({ codigo: 'limite_excedido' });
   });
 
   it('com a resposta já iniciada, só encerra a conexão', () => {

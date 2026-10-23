@@ -204,6 +204,8 @@ describe('fronteiras de camadas: árvore real', () => {
       `${N}/auditoria/repositorio-de-auditoria.ts`,
       `${N}/email/enviador-de-email.ts`,
       `${N}/titular/dado-pessoal.ts`,
+      // A guarda global consulta esta porta; a Identidade a implementa (01b, etapa 16).
+      `${N}/autenticacao/verificador-de-acesso.ts`,
     ];
     const proibido = new RegExp(
       `node_modules/(@nestjs|@prisma|nestjs-pino|pg|pg-boss|nodemailer)/|^${N}/(infra|http|log|observabilidade|config)/|\\.adaptador\\.ts$`,
