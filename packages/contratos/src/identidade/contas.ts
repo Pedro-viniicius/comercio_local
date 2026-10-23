@@ -185,8 +185,12 @@ export type CadastroAceito = z.infer<typeof cadastroAceitoSchema>;
 
 /**
  * `POST /v1/conta/verificacao-email` (com sessão, P1-dono): vale para a conta
- * da sessão. Resposta: 200 com a sessão renovada (`sessaoSchema`, com
- * `emailVerificado: true`). O reenvio (`.../reenvio`) usa `corpoVazioSchema`.
+ * da sessão. Respostas: 200 com a sessão renovada (`sessaoSchema`, com
+ * `emailVerificado: true`); 400 `campos[codigo].invalido` quando o código não
+ * serve (errado, vencido, já usado ou esgotado, também na quinta tentativa);
+ * 429 com `Retry-After` no freio por e-mail da conta (S93), o mesmo do login,
+ * em que cada código que não serve soma uma falha. O reenvio (`.../reenvio`)
+ * usa `corpoVazioSchema`.
  */
 export const verificarEmailSchema = objetoEstrito({ codigo: codigoSchema });
 export type VerificarEmail = z.infer<typeof verificarEmailSchema>;

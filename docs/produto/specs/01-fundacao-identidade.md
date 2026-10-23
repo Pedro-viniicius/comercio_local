@@ -106,14 +106,19 @@ Textos dos erros por campo:
 └──────────────────────────────┘
 ```
 ① O e-mail que a própria pessoa digitou (vem da tela anterior, não da API). "Corrigir e-mail" volta a A2 com tudo preenchido. ② Campo de código; envia sozinho ao completar 6 dígitos (o botão continua disponível). ③ Reenvio liberado após 60 s, com contagem em texto e anúncio só quando liberar; resposta sempre "Se houver uma conta para este e-mail, enviamos um novo código." (Toast).
-Estados: código errado, expirado ou já usado: erro no campo "Código inválido ou expirado. Confira ou peça um novo." (mensagem única, plano 01b); limite de tentativas: mesma mensagem. Sucesso: a API devolve sessão; a tela volta à origem com Toast "Conta confirmada. Boas-vindas ao Bairrin!". Offline: igual a A1; o código digitado fica.
+Estados:
+- Código errado, expirado ou já usado (400 `campos[codigo].invalido`): erro no campo "Código inválido ou expirado. Confira ou peça um novo." (mensagem única, plano 01b). O campo é limpo e recebe o foco.
+- **Freio por e-mail da conta (429 com `Retry-After`, S93):** Banner de erro acima do botão, com `role="alert"`: "Muitas tentativas. Tente de novo em N minutos." (N = `Retry-After` em segundos, arredondado para cima, mínimo 1; se o cabeçalho faltar ou for inválido: "Muitas tentativas. Tente de novo em alguns minutos."). Diferente do login, aqui o `Retry-After` **aparece**: a pessoa já está autenticada e o freio é da própria conta, então não há enumeração (CA-02/CA-04 intactos). O botão [Confirmar] e o envio automático ao completar 6 dígitos ficam **desabilitados** até o tempo passar, com o motivo no próprio Banner (não só cor nem só estado desabilitado); o campo continua editável e o que foi digitado fica. Sem contagem regressiva falando a cada segundo: o texto é fixo e, ao liberar, o Banner some, o botão volta e um anúncio educado (`aria-live="polite"`) diz "Pode tentar de novo." "Reenviar código" segue a regra própria dos 60 s e não é afetado por este freio.
+- Sucesso: a API devolve sessão; a tela volta à origem com Toast "Conta confirmada. Boas-vindas ao Bairrin!". Offline: igual a A1; o código digitado fica.
 Saída sem confirmar: a pessoa pode fechar; ao tentar entrar depois, usa "Receber novo código" em A1.
 
 ### A4. Recuperar senha (CA-06, CA-05)
 Passo 1: título "Recuperar senha", texto "Informe o e-mail da sua conta. Enviaremos um código para criar uma nova senha.", campo E-mail, [Enviar código]. Resposta sempre igual (202): avança para o passo 2 com o texto "Se houver uma conta para ana.souza@gmail.com, você vai receber um código em instantes. Ele vale por 30 minutos."
 Passo 2: Campo de código, campo "Nova senha" (`new-password`, regra de 8 caracteres), [Salvar nova senha], "Reenviar código" (60 s, mesmo comportamento de A3).
 Sucesso (204): volta a A1 com Banner de sucesso "Senha alterada. Por segurança, saímos da sua conta em todos os aparelhos. Entre com a nova senha." e o e-mail preenchido.
-Erros: código inválido, expirado ou usado: "Código inválido ou expirado. Peça um novo." (mesma mensagem para todos os casos). Offline e 5xx: como A1.
+Erros: código inválido, expirado ou usado: "Código inválido ou expirado. Peça um novo." (mesma mensagem para todos os casos).
+**429 (freio por e-mail ou por origem/IP):** nos dois passos, a mesma mensagem em Banner de erro acima do botão, com `role="alert"`: "Muitas tentativas. Tente de novo em alguns minutos." O `Retry-After` **não** aparece, o botão **não** é desabilitado e não há contagem, como no login (CA-04): a tela é pública e um tempo ou um freio que só alguns e-mails têm revelaria se há conta. Mesmo texto para o freio por origem e para o de e-mail, para a pessoa não distinguir um do outro. O que foi digitado fica; a nova senha é apagada. O 429 do passo 1 (pedido do código) usa o mesmo Banner.
+Offline e 5xx: como A1.
 
 ### A5. Minha conta (entrada; plano 01b, `GET /v1/conta`)
 Aba Conta do consumidor e aba Loja → "Minha conta" do lojista. Cabeçalho com nome e e-mail mascarado como vem da API. Itens de lista: "Privacidade e dados" (A6), "Termos de Uso" (Leitor), "Sair". "Sair" encerra a sessão (CA-05) sem modal e volta à navegação livre com Toast "Você saiu da sua conta". Sem login: Estado vazio "Entre para ver seus pedidos e dados" + [Entrar] + "Criar conta".
@@ -138,7 +143,8 @@ Aba Conta do consumidor e aba Loja → "Minha conta" do lojista. Cabeçalho com 
 │ Excluir minha conta     ›    │
 └──────────────────────────────┘
 ```
-① Dados de `GET /v1/privacidade`. ② Botão secundário (a tela não tem ação primária: é de consulta). Ao tocar: Modal de confirmação "Pedir cópia dos seus dados?" / "Enviaremos um arquivo para o e-mail da sua conta em até 48 horas." / [Pedir cópia] [Cancelar]. Sucesso (202): Banner de sucesso fixo na tela "Pedido recebido. O arquivo chega no e-mail da conta em até 48 horas." Pedido repetido em 24 h (limite do plano 01b): Banner informativo "Você já pediu uma cópia nas últimas 24 horas. Confira seu e-mail." ③ Item de lista com texto `red.700` e ícone, abre A6b (nunca exclui direto).
+① Dados de `GET /v1/privacidade`. ② Botão secundário (a tela não tem ação primária: é de consulta). Ao tocar: Modal de confirmação "Pedir cópia dos seus dados?" / "Preparamos sua cópia em até 48 horas e avisamos por e-mail. Você baixa o arquivo aqui, nesta tela." / [Pedir cópia] [Cancelar]. Sucesso (202): Banner de sucesso fixo na tela "Pedido recebido. Avisamos por e-mail quando a cópia estiver pronta, em até 48 horas. O download é nesta tela, por 7 dias." Pedido repetido em 24 h (limite do plano 01b): Banner informativo "Você já pediu uma cópia nas últimas 24 horas. Confira seu e-mail." ③ Item de lista com texto `red.700` e ícone, abre A6b (nunca exclui direto).
+Cópia pronta (S10): o e-mail só avisa, sem anexo. Na seção "Seus dados" aparece o item "Sua cópia está pronta · vale até DD/MM/AAAA às HH:MM (horário de Brasília)" (no celular, a hora pode ir numa segunda linha em texto secundário; mesmo formato e fuso do e-mail) com [Baixar cópia] (o arquivo vem da API com a sessão, uso único); depois de baixada ou vencida, volta o botão "Pedir cópia dos meus dados". Textos finais em `privacidade.copia.pronta` e `privacidade.copia.baixar`; o contrato do download é do plano 01b (confirmar com o dev).
 Estados: carregando (Skeleton das linhas); erro de carga (Estado vazio com "Tentar de novo"); offline (Faixa offline, última versão vista se houver cache; botões desabilitados com a razão).
 
 ### A6b. Excluir conta (CA-11)
@@ -198,7 +204,7 @@ Mesmo fluxo e textos de A4, no Cartão de autenticação. Depois de redefinir, P
 | Situação | Comportamento | Origem |
 |---|---|---|
 | Conta existe ou não | Mesmo texto em cadastro, reenvio, recuperação e login | CA-02, CA-04, CA-06 |
-| Bloqueio progressivo | Mesma mensagem do login errado; sem contagem, sem desabilitar | CA-04 |
+| Bloqueio progressivo | Mesma mensagem do login errado; sem contagem, sem desabilitar (login e recuperação, telas públicas). Exceção: a A3, autenticada e com freio da própria conta, mostra o tempo do `Retry-After` e desabilita [Confirmar] até ele passar (S93) | CA-04 |
 | Payload inválido | Erro por campo a partir de `campos[]`; nunca texto técnico | CA-13 |
 | Erro inesperado | Banner genérico com "Tentar de novo"; `idRequisicao` não aparece para o usuário (fica nos logs) | plano 00, Contratos |
 | Offline | Faixa offline; ações desabilitadas com a razão; nada digitado se perde | CA-38 (padrão) |
@@ -222,7 +228,7 @@ Além dos já citados nas telas:
 | conta.codigo.invalido | "Código inválido ou expirado. Confira ou peça um novo." |
 | conta.sessao.terminou | "Sua sessão terminou. Entre de novo para continuar." |
 | conta.sair.toast | "Você saiu da sua conta" |
-| privacidade.copia.recebida | "Pedido recebido. O arquivo chega no e-mail da conta em até 48 horas." |
+| privacidade.copia.recebida | "Pedido recebido. Avisamos por e-mail quando a cópia estiver pronta, em até 48 horas. O download é nesta tela, por 7 dias." |
 | privacidade.exclusao.botao | "Excluir minha conta" |
 | painel.2fa.passo3.aviso | "Estes códigos aparecem só agora. Cada um funciona uma vez, se você perder o celular." |
 

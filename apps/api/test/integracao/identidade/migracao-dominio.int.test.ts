@@ -475,6 +475,7 @@ describe('Sessao: cada estado passa nos CHECKs e volta igual (S1, S9, S16, CA-05
     'conta_desativada',
     'substituida',
     'segundo_fator_reconfigurado',
+    'segundo_fator_freado',
   ] as const)('o motivo de revogação %s é gravável e volta igual', async (motivo) => {
     await comContaGravada(async () => {
       const sessao = Sessao.criar({

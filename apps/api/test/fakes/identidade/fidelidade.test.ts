@@ -249,7 +249,7 @@ describe('listarParaExpurgo imita a consulta do repositório real (P1-dono)', ()
     return { identidade, agora };
   }
 
-  it('só as ativas, não verificadas, sem perfil lojista ou admin e sem login há mais de 7 dias, das mais antigas para as mais novas', async () => {
+  it('só as ativas, não verificadas, sem perfil lojista ou admin e sem login há mais de 7 dias, em ordem de id', async () => {
     const { identidade, agora } = await cenario();
     await expect(identidade.contas.listarParaExpurgo(limiteDoExpurgo(agora), 10)).resolves.toEqual([
       uuid(10),
@@ -262,5 +262,49 @@ describe('listarParaExpurgo imita a consulta do repositório real (P1-dono)', ()
     await expect(identidade.contas.listarParaExpurgo(limiteDoExpurgo(agora), 1)).resolves.toEqual([
       uuid(10),
     ]);
+  });
+
+  it('com cursor, só os ids depois dele (S105)', async () => {
+    const { identidade, agora } = await cenario();
+    const limite = limiteDoExpurgo(agora);
+    await expect(identidade.contas.listarParaExpurgo(limite, 10, uuid(10))).resolves.toEqual([
+      uuid(11),
+    ]);
+    await expect(identidade.contas.listarParaExpurgo(limite, 10, uuid(11))).resolves.toEqual([]);
+  });
+});
+
+describe('listarPorStatus imita a consulta do repositório real (S105)', () => {
+  it('ordena por (solicitada_em, id) e, com cursor, só devolve as que vêm depois dele', async () => {
+    const identidade = criarIdentidadeEmMemoria();
+    await identidade.contas.inserir(conta(ANA, 'ana@exemplo.com'));
+    const nova = (n: number, solicitadaEm: Date) => ({
+      id: uuid(100 + n),
+      contaId: ANA,
+      tipo: 'exclusao' as const,
+      status: 'pendente' as const,
+      solicitadaEm,
+      concluidaEm: null,
+    });
+    const empate = new Date(AGORA.getTime() + DIA);
+    // Inseridas fora de ordem; duas no mesmo instante (o id desempata).
+    for (const s of [nova(3, empate), nova(1, AGORA), nova(2, empate)]) {
+      await identidade.solicitacoes.inserir(s);
+    }
+
+    const todas = await identidade.solicitacoes.listarPorStatus('exclusao', 'pendente', 10);
+    expect(todas.map((s) => s.id)).toEqual([uuid(101), uuid(102), uuid(103)]);
+    const depoisDaPrimeira = await identidade.solicitacoes.listarPorStatus(
+      'exclusao',
+      'pendente',
+      10,
+      { solicitadaEm: AGORA, id: uuid(101) },
+    );
+    expect(depoisDaPrimeira.map((s) => s.id)).toEqual([uuid(102), uuid(103)]);
+    const noEmpate = await identidade.solicitacoes.listarPorStatus('exclusao', 'pendente', 10, {
+      solicitadaEm: empate,
+      id: uuid(102),
+    });
+    expect(noEmpate.map((s) => s.id)).toEqual([uuid(103)]);
   });
 });

@@ -2,7 +2,7 @@
 // etapa certa e token `<id>.<segredo>`, leitura do token (sem `.`, id
 // inexistente e HMAC que não confere dão o mesmo `null`) e a sessão do painel
 // com `mfa`.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CifradorFalso,
   EmissorDeJwtFalso,
@@ -22,6 +22,7 @@ import {
   lerDesafio,
   lerTokenDoDesafio,
   podeConcluirSegundoFator,
+  travarFreioPorEmailDoDesafio,
 } from './comum.ts';
 
 const AGORA = new Date('2026-10-18T12:00:00.000Z');
@@ -178,6 +179,54 @@ describe('lerDesafio: o mesmo null para qualquer token que não vale', () => {
     ['id que não é UUID (o banco recusaria a consulta)', 'abc.segredo'],
   ])('formato inválido (%s) nem chega ao repositório', (_caso, token) => {
     expect(lerTokenDoDesafio(token)).toBeNull();
+  });
+});
+
+describe('travarFreioPorEmailDoDesafio (S104)', () => {
+  function travar(c: ReturnType<typeof cenario>, token: string) {
+    const { identidade, cifrador } = c;
+    return identidade.unidade.executar(() =>
+      travarFreioPorEmailDoDesafio(
+        {
+          desafios: identidade.desafios,
+          contas: identidade.contas,
+          bloqueios: identidade.bloqueios,
+          cifrador,
+        },
+        token,
+        AGORA,
+      ),
+    );
+  }
+
+  it('token certo: trava o freio por e-mail da conta, sem travar o desafio, e devolve a conta', async () => {
+    const c = cenario();
+    await c.identidade.contas.inserir(admin());
+    const emitido = await c.emitir();
+    const travaDoFreio = vi.spyOn(c.identidade.bloqueios, 'buscarParaAtualizar');
+    const travaDoDesafio = vi.spyOn(c.identidade.desafios, 'buscarPorIdParaAtualizar');
+
+    await expect(travar(c, emitido.desafio)).resolves.toBe(CONTA);
+
+    expect(travaDoFreio.mock.calls.map(([, tipo]) => tipo)).toEqual(['email']);
+    expect(travaDoDesafio).not.toHaveBeenCalled();
+    // O freio não muda: a linha zerada que a trava criou é apagada.
+    expect(c.identidade.bloqueios.todos()).toEqual([]);
+  });
+
+  it('token mal formado, id inexistente ou HMAC que não confere: null, sem travar nada', async () => {
+    const c = cenario();
+    await c.identidade.contas.inserir(admin());
+    const emitido = await c.emitir();
+    const lido = lerTokenDoDesafio(emitido.desafio);
+    const travaDoFreio = vi.spyOn(c.identidade.bloqueios, 'buscarParaAtualizar');
+
+    await expect(travar(c, emitido.desafio.replace('.', ''))).resolves.toBeNull();
+    await expect(
+      travar(c, `cccccccc-cccc-4ccc-8ccc-cccccccccccc.${lido?.segredo ?? ''}`),
+    ).resolves.toBeNull();
+    await expect(travar(c, `${lido?.id ?? ''}.outro-segredo`)).resolves.toBeNull();
+    expect(travaDoFreio).not.toHaveBeenCalled();
   });
 });
 

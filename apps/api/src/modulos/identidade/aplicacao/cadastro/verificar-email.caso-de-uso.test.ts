@@ -20,6 +20,7 @@ import {
   TENTATIVAS_POR_CODIGO,
   VALIDADE_DO_CODIGO_EM_MS,
 } from '../../dominio/codigo-de-verificacao.ts';
+import { ESPERAS_EM_MS, LIMIAR_DE_FALHAS } from '../../dominio/bloqueio-de-login.ts';
 import { Conta } from '../../dominio/conta.ts';
 import { Email } from '../../dominio/email.ts';
 import type { RepositorioDeSessoes } from '../../dominio/repositorios.ts';
@@ -31,6 +32,7 @@ import {
   Sessao,
 } from '../../dominio/sessao.ts';
 import { Telefone } from '../../dominio/telefone.ts';
+import { chaveDoFreioPorEmail } from '../comum/chaves.ts';
 import type { TokenDeAcesso } from '../portas/emissor-de-jwt.ts';
 import {
   type ResultadoDeVerificarEmail,
@@ -122,6 +124,7 @@ async function cenario(
     contas,
     sessoes,
     identidade.codigos,
+    identidade.bloqueios,
     cifrador,
     new GeradorDeSegredosFalso(),
     opcoes.emissor ?? emissor,
@@ -295,6 +298,9 @@ describe('VerificarEmailCasoDeUso: código que não serve (spec 01, A3)', () => 
         atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: '000000' }),
       ).resolves.toEqual({ tipo: 'codigo_invalido' });
     }
+    // A quinta falha também aciona o freio por e-mail (S93): passada a espera de
+    // 1 min, o código esgotado continua sem servir.
+    atual.relogio.definir(new Date(AGORA.getTime() + (ESPERAS_EM_MS[0] ?? 0)));
     await expect(
       atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: CODIGO_CERTO }),
     ).resolves.toEqual({ tipo: 'codigo_invalido' });
@@ -349,6 +355,92 @@ describe('VerificarEmailCasoDeUso: código que não serve (spec 01, A3)', () => 
       atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: CODIGO_CERTO }),
     ).resolves.toEqual({ tipo: 'codigo_invalido' });
     expect(atual.identidade.contas.dadosDe(CONTA)?.emailVerificadoEm).toBeNull();
+  });
+});
+
+describe('VerificarEmailCasoDeUso: freio por e-mail da conta (S93)', () => {
+  const chaveDaConta = cifrador.hmac('bloqueio_email', ['ana@exemplo.com']);
+
+  function freioDaConta(identidade: IdentidadeEmMemoria) {
+    return identidade.bloqueios
+      .todos()
+      .find((freio) => freio.tipo === 'email' && freio.chaveHmac === chaveDaConta);
+  }
+
+  async function falhasNoFreio(identidade: IdentidadeEmMemoria, falhas: number): Promise<void> {
+    await identidade.unidade.executar(async () => {
+      const freio = await identidade.bloqueios.buscarParaAtualizar(chaveDaConta, 'email', AGORA);
+      for (let falha = 0; falha < falhas; falha += 1) freio.registrarFalha(AGORA);
+      await identidade.bloqueios.salvar(freio);
+    });
+  }
+
+  it('a chave é a do login e da redefinição (chaveDoFreioPorEmail do e-mail da conta)', () => {
+    expect(chaveDaConta).toBe(chaveDoFreioPorEmail(cifrador, Email.criar('ana@exemplo.com')));
+  });
+
+  it('código errado soma uma falha no freio por e-mail da conta', async () => {
+    const atual = await cenario();
+
+    await atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: '000000' });
+
+    expect(freioDaConta(atual.identidade)).toMatchObject({ falhas: 1, bloqueadoAte: null });
+  });
+
+  it('sem código vigente, a tentativa também soma no freio', async () => {
+    const atual = await cenario({ semCodigo: true });
+
+    await atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: CODIGO_CERTO });
+
+    expect(freioDaConta(atual.identidade)).toMatchObject({ falhas: 1 });
+  });
+
+  it('com o freio ativo: freado, sem conferir o código nem gastar tentativa', async () => {
+    const atual = await cenario();
+    await falhasNoFreio(atual.identidade, LIMIAR_DE_FALHAS.email);
+
+    await expect(
+      atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: CODIGO_CERTO }),
+    ).resolves.toEqual({ tipo: 'freado', segundosDeEspera: 60 });
+
+    esperarNadaMudou(atual, 0);
+  });
+
+  it('a quinta falha aciona a espera, e a próxima tentativa já sai freada', async () => {
+    const atual = await cenario();
+    await falhasNoFreio(atual.identidade, LIMIAR_DE_FALHAS.email - 1);
+
+    await atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: '000000' });
+    const resultado = await atual.casoDeUso.executar({
+      contaId: CONTA,
+      sid: SID,
+      codigo: CODIGO_CERTO,
+    });
+
+    expect(resultado).toEqual({ tipo: 'freado', segundosDeEspera: 60 });
+    expect(atual.identidade.contas.dadosDe(CONTA)?.emailVerificadoEm).toBeNull();
+  });
+
+  it('o código certo verifica e não zera o freio (o código não é a senha)', async () => {
+    const atual = await cenario();
+    await falhasNoFreio(atual.identidade, 2);
+
+    const resultado = await atual.casoDeUso.executar({
+      contaId: CONTA,
+      sid: SID,
+      codigo: CODIGO_CERTO,
+    });
+
+    expect(resultado.tipo).toBe('verificado');
+    expect(freioDaConta(atual.identidade)).toMatchObject({ falhas: 2 });
+  });
+
+  it('o código certo sem falha anterior não deixa linha de freio zerada', async () => {
+    const atual = await cenario();
+
+    await atual.casoDeUso.executar({ contaId: CONTA, sid: SID, codigo: CODIGO_CERTO });
+
+    expect(atual.identidade.bloqueios.todos()).toEqual([]);
   });
 });
 

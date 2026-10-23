@@ -5,6 +5,7 @@ import { Injectable } from '@nestjs/common';
 import type { SolicitacaoDoTitular as SolicitacaoDoTitularPrisma } from '../../../../compartilhado/infra/gerado/prisma/client.ts';
 import { UnidadeDeTrabalhoPrisma } from '../../../../compartilhado/infra/unidade-de-trabalho-prisma.ts';
 import {
+  type CursorDeSolicitacao,
   RepositorioDeSolicitacoes,
   type SolicitacaoDoTitular,
   type StatusDaSolicitacao,
@@ -66,10 +67,22 @@ export class RepositorioDeSolicitacoesPrisma extends RepositorioDeSolicitacoes {
     tipo: TipoDeSolicitacao,
     status: StatusDaSolicitacao,
     quantidade: number,
+    depoisDe: CursorDeSolicitacao | null = null,
   ): Promise<readonly SolicitacaoDoTitular[]> {
     if (!Number.isInteger(quantidade) || quantidade <= 0) return [];
+    if (depoisDe !== null && !ehUuid(depoisDe.id)) return [];
+    // (solicitada_em, id) > (cursor), na mesma ordem do ORDER BY.
+    const depoisDoCursor =
+      depoisDe === null
+        ? {}
+        : {
+            OR: [
+              { solicitadaEm: { gt: depoisDe.solicitadaEm } },
+              { solicitadaEm: depoisDe.solicitadaEm, id: { gt: depoisDe.id } },
+            ],
+          };
     const linhas = await this.unidade.cliente().solicitacaoDoTitular.findMany({
-      where: { tipo, status },
+      where: { tipo, status, ...depoisDoCursor },
       orderBy: [{ solicitadaEm: 'asc' }, { id: 'asc' }],
       take: quantidade,
     });

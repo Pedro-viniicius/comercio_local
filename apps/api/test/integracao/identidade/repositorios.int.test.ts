@@ -452,24 +452,30 @@ describe('RepositorioDeContasPrisma', () => {
         ids.set(conta.id, caso);
       }
       const listados = (await contas.listarParaExpurgo(limite, 100)).filter((id) => ids.has(id));
+      // Em ordem de id (S105); o UUID em minúsculas ordena no JS como no banco.
       const esperados = Object.values(casos)
         .map((dados) => Conta.reconstituir(dados))
         .filter((conta) => conta.deveSerExpurgada(agora))
-        .sort(
-          (a, b) =>
-            (a.ultimoLoginEm ?? a.criadaEm).getTime() - (b.ultimoLoginEm ?? b.criadaEm).getTime(),
-        )
-        .map((conta) => conta.id);
+        .map((conta) => conta.id)
+        .sort();
 
-      expect(listados.map((id) => ids.get(id))).toEqual(esperados.map((id) => ids.get(id)));
-      // Pela última atividade (login ou, sem login, o cadastro), da mais antiga para a mais nova.
-      expect(listados.map((id) => ids.get(id))).toEqual([
+      expect(listados).toEqual(esperados);
+      expect(listados.map((id) => ids.get(id)).sort()).toEqual([
+        'criada 1 ms antes do limite',
         'login antigo',
         'sem login, criada antes do limite',
-        'criada 1 ms antes do limite',
       ]);
       const [primeiro] = await contas.listarParaExpurgo(limite, 1);
-      expect(ids.get(primeiro ?? '')).toBe('login antigo');
+      expect(primeiro).toBe(listados[0]);
+      // Cursor: só os ids depois do último visto.
+      const depoisDoPrimeiro = (
+        await contas.listarParaExpurgo(limite, 100, listados[0] ?? null)
+      ).filter((id) => ids.has(id));
+      expect(depoisDoPrimeiro).toEqual(listados.slice(1));
+      await expect(contas.listarParaExpurgo(limite, 100, listados.at(-1) ?? null)).resolves.toEqual(
+        [],
+      );
+      await expect(contas.listarParaExpurgo(limite, 100, 'nao-e-uuid')).resolves.toEqual([]);
       await expect(contas.listarParaExpurgo(limite, 0)).resolves.toEqual([]);
     });
   });
@@ -816,6 +822,42 @@ describe('RepositorioDeCodigosDeVerificacaoPrisma e RepositorioDeDesafiosPrisma'
     });
   });
 
+  it('buscarPorId lê só desafios, sem trava; apagarDaConta leva só os desafios da conta (Q29)', async () => {
+    await desfeito(async () => {
+      const conta = novaConta();
+      const outra = novaConta();
+      for (const c of [conta, outra]) await contas.inserir(c);
+      const configurar = desafio(conta.id, T0, 'configurar');
+      const verificar = desafio(conta.id, T0, 'verificar');
+      verificar.avaliarCodigo({
+        etapa: 'verificar',
+        freio: BloqueioDeLogin.novo(`f-${randomUUID()}`, 'segundo_fator', T0),
+        codigoConfere: false,
+        agora: depois(UM_MINUTO),
+      });
+      const daOutra = desafio(outra.id, T0);
+      for (const d of [configurar, verificar, daOutra]) await desafios.inserir(d);
+      const recuperacao = codigo(conta.id, T0, 'recuperacao_senha');
+      await codigos.inserir(recuperacao);
+
+      expect((await desafios.buscarPorId(verificar.id))?.dados).toEqual(verificar.dados);
+      await expect(desafios.buscarPorId(recuperacao.id)).resolves.toBeNull();
+      await expect(desafios.buscarPorId('nao-e-uuid')).resolves.toBeNull();
+      expect(await desafios.somarTentativasDesde(conta.id, new Date(T0.getTime() - 1))).toBe(1);
+
+      await desafios.apagarDaConta(conta.id);
+      await desafios.apagarDaConta('nao-e-uuid');
+
+      await expect(desafios.buscarPorId(configurar.id)).resolves.toBeNull();
+      await expect(desafios.buscarPorId(verificar.id)).resolves.toBeNull();
+      expect(await desafios.somarTentativasDesde(conta.id, new Date(T0.getTime() - 1))).toBe(0);
+      expect((await desafios.buscarPorId(daOutra.id))?.contaId).toBe(outra.id);
+      expect((await linhaNaTransacao('codigos_verificacao', recuperacao.id))['finalidade']).toBe(
+        'recuperacao_senha',
+      );
+    });
+  });
+
   it('as leituras com trava recusam trabalho fora da unidade (R1)', async () => {
     await expect(
       codigos.buscarVigenteParaAtualizar(randomUUID(), 'verificacao_email', T0),
@@ -824,6 +866,9 @@ describe('RepositorioDeCodigosDeVerificacaoPrisma e RepositorioDeDesafiosPrisma'
       ForaDaUnidadeDeTrabalhoPrisma,
     );
     await expect(bloqueios.buscarParaAtualizar('chave', 'email', T0)).rejects.toBeInstanceOf(
+      ForaDaUnidadeDeTrabalhoPrisma,
+    );
+    await expect(contas.travarCriacaoDeAdmin()).rejects.toBeInstanceOf(
       ForaDaUnidadeDeTrabalhoPrisma,
     );
   });
@@ -1066,6 +1111,23 @@ describe('RepositorioDeSolicitacoesPrisma e RepositorioDeExportacoesPrisma', () 
       await expect(solicitacoes.buscarUltima(randomUUID(), 'exportacao')).resolves.toBeNull();
       const pendentes = await solicitacoes.listarPorStatus('exportacao', 'pendente', 2);
       expect(pendentes.map((s) => s.id)).toEqual([primeira.id, segunda.id]);
+      // Cursor (S105): (solicitada_em, id) depois da primeira; o id desempata o mesmo instante.
+      const depoisDaPrimeira = await solicitacoes.listarPorStatus('exportacao', 'pendente', 1, {
+        solicitadaEm: primeira.solicitadaEm,
+        id: primeira.id,
+      });
+      expect(depoisDaPrimeira.map((s) => s.id)).toEqual([segunda.id]);
+      const mesmoInstante = await solicitacoes.listarPorStatus('exportacao', 'pendente', 1, {
+        solicitadaEm: segunda.solicitadaEm,
+        id: '00000000-0000-0000-0000-000000000000',
+      });
+      expect(mesmoInstante.map((s) => s.id)).toEqual([segunda.id]);
+      const depoisDaSegunda = await solicitacoes.listarPorStatus('exportacao', 'pendente', 1, {
+        solicitadaEm: segunda.solicitadaEm,
+        id: segunda.id,
+      });
+      expect(depoisDaSegunda.map((s) => s.id)).not.toContain(segunda.id);
+      expect(depoisDaSegunda.map((s) => s.id)).not.toContain(primeira.id);
 
       const concluida = { ...primeira, status: 'concluida' as const, concluidaEm: em(5) };
       await solicitacoes.atualizar(concluida);

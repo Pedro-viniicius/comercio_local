@@ -19,4 +19,5 @@
 - [Casos de uso da Identidade](casos-de-uso-identidade.md) — travas conta→sessões, sentinela, reserva da tentativa (S91), comum/chaves.ts, portas de uma coluna, limite da exportação
 - [Privacidade da Identidade](identidade-privacidade.md) — pendências aguardam (spec Q2 aberta), chave do freio por e-mail, uso único por marcarBaixada booleano, tsc isolado
 - [2FA do admin](identidade-2fa.md) — helpers em segundo-fator/comum.ts, emissão invalida desafios, teste do R8 nos fakes, CLI por createApplicationContext
+- [Assinantes e tarefas da Identidade](assinantes-tarefas-identidade.md) — trigger no Prisma (P2039), marca do S15, freio e-mail no início do 2FA, Q29, advisory locks, operador na integração
 - [Repositórios Prisma da Identidade](repositorios-prisma-identidade.md) — erro do PG aborta a transação, ON CONFLICT DO UPDATE no freio, NO KEY UPDATE x FK, pausa do qa, pg_locks, S78

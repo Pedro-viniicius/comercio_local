@@ -2,6 +2,13 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-21 — Decisão do dono: nome nos e-mails (S102) e teto diário do 2FA (S103)
+- Contexto: revisão do grupo D do 01b (etapa 13). O `seguranca` mostrou que o nome escolhido no cadastro chega, num e-mail legítimo do Bairrin, a um endereço que ninguém verificou (S102, uso para phishing), e que o freio de segundo fator não tem teto diário: 4 erros a cada 15 min nunca acionam a espera, e a calma de 15 min zera o nível, então a P16 nunca dispara (S103).
+- Decisão (S102): e-mail para conta com e-mail ainda não verificado não leva o nome ("Olá!"); o e-mail de verificação nunca leva o nome. Depois da verificação, o nome volta.
+- Decisão (S103): teto de 20 códigos errados de segundo fator por conta em 24 h. Acima disso, a mesma reação do nível máximo da P16: a senha é apagada, as sessões da conta são revogadas (S104) e o dono recebe o aviso para recuperar a senha.
+- Motivo: as duas recomendações do `seguranca`; um admin legítimo raramente erra 20 vezes num dia e, se errar, recupera a senha pelo e-mail.
+- Complemento (Q29, mesmo dia): a contagem dos 20 recomeça quando a senha é redefinida. A redefinição apaga os desafios de segundo fator da conta, sem migração. Não se usa o `usado_em` do código de recuperação como marco, porque qualquer pessoa pede um código novo pela rota pública e isso marcaria o anterior como usado. O dono autorizou uma 3ª rodada curta para o Q29 e os opcionais baratos (trava do primeiro `seed:admin`, simplificação da trava do 2FA, R7).
+
 ## 2026-10-19 — Decisão do dono: terceira rodada no grupo C, freio de IP pela reserva e P16
 - Terceira rodada: depois de duas rodadas no grupo C do 01b, sobrou um achado obrigatório, R8 do `revisor` e Q25 do `qa`. No passo 3 da configuração do 2FA no painel, a interação entre 28 e 30 min era ignorada e os códigos de recuperação se perdiam. O dono autorizou uma terceira rodada para o R8 e para as sugestões baratas: A-R13 (a CLI do 2FA trava o freio por e-mail), limpeza local da sessão ao receber `outra_aba`, R10, A-R11 e A-R14. Depois vêm o commit e o push do grupo C.
 - Risco aceito (A-R12): com a reserva da tentativa (S91), um login com a senha certa conta provisoriamente como falha no freio de IP até a senha ser conferida. Se a reserva for a 50ª falha da origem, ou se houver muitos logins simultâneos atrás do mesmo CGNAT, o IP fica freado por 1 min para novos logins. A pessoa com a senha certa entra. É falha fechada. Reabre se houver queixa medida de bloqueio em rede de operadora.

@@ -7,6 +7,11 @@
 // - Código errado, vencido, já usado ou esgotado: sempre `codigo_invalido`
 //   (400 com `campos[codigo].invalido`), também na quinta tentativa (spec 01,
 //   A3). A tentativa errada fica gravada: a transação confirma.
+// - Freio por e-mail (S93, grupo C): cada código que não serve soma uma falha
+//   no freio por e-mail da conta (`chaveDoFreioPorEmail`, o mesmo do login, da
+//   redefinição e da exclusão). Com o freio ativo, `freado` (429 com
+//   `Retry-After`), sem conferir o código nem gastar tentativa. O código certo
+//   não zera o freio: ele não é a senha, e o freio também protege o login.
 // - Código certo: e-mail verificado e a sessão trocada por uma nova da mesma
 //   família (a antiga é revogada com `substituida`), com o mesmo cliente e sem
 //   `mfa`, então o token novo nunca leva `admin` (S1). No painel, a nova herda
@@ -18,7 +23,8 @@
 //   encerrada ainda chega aqui; sem esta conferência, a verificação
 //   ressuscitaria uma sessão encerrada com um token de renovação novo.
 //
-// Ordem das travas, na mesma transação: o código (`buscarVigenteParaAtualizar`)
+// Ordem das travas, na mesma transação: o freio por e-mail (antes de tudo, como
+// no cabeçalho de `dominio/repositorios.ts`) → o código (`buscarVigenteParaAtualizar`)
 // → a conta (`gravarEmailVerificado`, um UPDATE só de `email_verificado_em`
 // condicionado a `status = 'ativa'`) → as sessões da família
 // (`revogarDaFamilia`, um UPDATE condicionado a `revogada_em IS NULL`), a mesma
@@ -31,12 +37,13 @@ import { Injectable } from '@nestjs/common';
 import { Relogio } from '../../../../compartilhado/tempo/relogio.ts';
 import { UnidadeDeTrabalho } from '../../../../compartilhado/transacao/unidade-de-trabalho.ts';
 import {
+  RepositorioDeBloqueios,
   RepositorioDeCodigosDeVerificacao,
   RepositorioDeContas,
   RepositorioDeSessoes,
 } from '../../dominio/repositorios.ts';
 import { reivindicacoesDoToken, Sessao } from '../../dominio/sessao.ts';
-import { hashDoTokenDeRenovacao } from '../comum/chaves.ts';
+import { chaveDoFreioPorEmail, hashDoTokenDeRenovacao } from '../comum/chaves.ts';
 import type { SessaoEmitida } from '../comum/sessao-emitida.ts';
 import { Cifrador } from '../portas/cifrador.ts';
 import { EmissorDeJwt } from '../portas/emissor-de-jwt.ts';
@@ -54,7 +61,9 @@ export interface EntradaDeVerificarEmail {
 export type ResultadoDeVerificarEmail =
   | { readonly tipo: 'verificado'; readonly sessao: SessaoEmitida }
   | { readonly tipo: 'codigo_invalido' }
-  | { readonly tipo: 'sessao_invalida' };
+  | { readonly tipo: 'sessao_invalida' }
+  /** Freio por e-mail da conta ativo (429 com `Retry-After` = `segundosDeEspera`; S93). */
+  | { readonly tipo: 'freado'; readonly segundosDeEspera: number };
 
 const CODIGO_INVALIDO: ResultadoDeVerificarEmail = { tipo: 'codigo_invalido' };
 const SESSAO_INVALIDA: ResultadoDeVerificarEmail = { tipo: 'sessao_invalida' };
@@ -75,6 +84,7 @@ export class VerificarEmailCasoDeUso {
     private readonly contas: RepositorioDeContas,
     private readonly sessoes: RepositorioDeSessoes,
     private readonly codigos: RepositorioDeCodigosDeVerificacao,
+    private readonly bloqueios: RepositorioDeBloqueios,
     private readonly cifrador: Cifrador,
     private readonly gerador: GeradorDeSegredos,
     private readonly emissor: EmissorDeJwt,
@@ -99,19 +109,35 @@ export class VerificarEmailCasoDeUso {
       return SESSAO_INVALIDA;
     }
 
+    // Sem trava: só para a chave do freio (o e-mail da conta não muda).
+    const lida = await this.contas.buscarPorId(contaId);
+    if (lida?.status !== 'ativa') return SESSAO_INVALIDA;
+    const freio = await this.bloqueios.buscarParaAtualizar(
+      chaveDoFreioPorEmail(this.cifrador, lida.email),
+      'email',
+      agora,
+    );
+    if (freio.estaBloqueado(agora)) {
+      await this.bloqueios.salvar(freio);
+      return { tipo: 'freado', segundosDeEspera: freio.segundosDeEspera(agora) };
+    }
+
     const registro = await this.codigos.buscarVigenteParaAtualizar(
       contaId,
       'verificacao_email',
       agora,
     );
-    if (registro === null) return CODIGO_INVALIDO;
-    const confere = this.cifrador.hmacConfere(
-      'verificacao_email',
-      [contaId, codigo],
-      registro.codigoHmac,
-    );
-    const resultado = registro.conferir(confere, agora);
-    await this.codigos.atualizar(registro);
+    const resultado =
+      registro === null
+        ? 'invalido'
+        : registro.conferir(
+            this.cifrador.hmacConfere('verificacao_email', [contaId, codigo], registro.codigoHmac),
+            agora,
+          );
+    if (registro !== null) await this.codigos.atualizar(registro);
+    if (resultado !== 'aceito') freio.registrarFalha(agora);
+    // Grava a falha, ou apaga a linha zerada que `buscarParaAtualizar` criou.
+    await this.bloqueios.salvar(freio);
     if (resultado !== 'aceito') return CODIGO_INVALIDO;
 
     // Só `email_verificado_em`, e só com a conta ainda ativa; `false` é exclusão no meio.

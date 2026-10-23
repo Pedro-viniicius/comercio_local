@@ -145,6 +145,7 @@ export function montarPilha() {
         contas,
         sessoes,
         codigos,
+        bloqueios,
         cifrador,
         gerador,
         emissor,
@@ -208,6 +209,8 @@ export function montarPilha() {
         gerador,
         totp,
         emissor,
+        publicador,
+        auditoria,
       ),
       verificarSegundoFator: new VerificarSegundoFatorCasoDeUso(
         unidade,
@@ -221,6 +224,8 @@ export function montarPilha() {
         gerador,
         totp,
         emissor,
+        publicador,
+        auditoria,
       ),
       reconfigurarSegundoFator: new ReconfigurarSegundoFatorCasoDeUso(
         unidade,
@@ -622,6 +627,23 @@ export function totpDe(segredoBase32: string, quando: Date): string {
  * fator pelos casos de uso: login no painel, configuração, confirmação. Devolve o segredo, os
  * 10 códigos de recuperação e a sessão do painel aberta pela confirmação.
  */
+/**
+ * Uma conta admin ativa (cadastro + `admin` concedido direto, sem 2FA), para servir de
+ * operador da CLI `seed:admin` (S106). Devolve a conta; quem chama a põe na limpeza.
+ */
+export async function operadorAdmin(
+  pilha: Pilha,
+  documentos: DocumentosDeTeste,
+): Promise<ContaDeTeste> {
+  const conta = await cadastrar(pilha, documentos);
+  const { Email } = await import('../../../src/modulos/identidade/dominio/email.ts');
+  const carregada = await pilha.repos.contas.buscarPorEmail(Email.criar(conta.email));
+  if (carregada === null) throw new Error('conta sumiu');
+  carregada.concederAdmin(pilha.relogio.agora());
+  await pilha.repos.contas.atualizar(carregada);
+  return conta;
+}
+
 export async function prepararAdmin(
   pilha: Pilha,
   documentos: DocumentosDeTeste,

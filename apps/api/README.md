@@ -183,5 +183,5 @@ pnpm --filter api test:integracao -- outbox email-smtp   # só os arquivos que c
 
 ## Futuro
 
-- `seed:admin` está no `package.json`, mas o CLI (`src/cli/seed-admin.ts`) ainda não existe (plano 01b, etapa 13). Ao contrário do `seed`, ele roda em produção, por CLI.
+- `seed:admin` (`src/cli/seed-admin.ts`, plano 01b, etapa 13) cria a conta admin sem senha; ao contrário do `seed`, roda em produção, por CLI. Lê da entrada padrão, uma linha cada, o e-mail, o e-mail de novo, o nome e o celular (nada pessoal por argumento); depois do primeiro admin, exige `--operador <id da sua conta admin>`, gravado na auditoria. Só funciona depois que a etapa 16 registrar `CriarAdminCasoDeUso` no `IdentidadeModule`.
 - `/v1/docs` (OpenAPI gerado dos esquemas) e `GET /v1/app/versao-minima`.

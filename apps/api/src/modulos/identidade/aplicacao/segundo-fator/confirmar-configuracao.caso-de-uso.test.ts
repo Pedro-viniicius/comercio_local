@@ -15,10 +15,19 @@ import {
 import { criarIdentidadeEmMemoria } from '../../../../../test/fakes/identidade/repositorios-em-memoria.ts';
 import { BloqueioDeLogin } from '../../dominio/bloqueio-de-login.ts';
 import { Conta } from '../../dominio/conta.ts';
-import { TENTATIVAS_POR_DESAFIO } from '../../dominio/desafio-de-segundo-fator.ts';
+import {
+  LIMITE_DE_ERROS_DE_SEGUNDO_FATOR_POR_DIA,
+  TENTATIVAS_POR_DESAFIO,
+} from '../../dominio/desafio-de-segundo-fator.ts';
 import { Email } from '../../dominio/email.ts';
+import { Sessao } from '../../dominio/sessao.ts';
 import { Telefone } from '../../dominio/telefone.ts';
-import { chaveDoFreioDeSegundoFator, emitirDesafioDeSegundoFator } from './comum.ts';
+import { chaveDoFreioPorEmail } from '../comum/chaves.ts';
+import {
+  chaveDoFreioDeSegundoFator,
+  emitirDesafioDeSegundoFator,
+  NIVEL_MAXIMO_DO_FREIO,
+} from './comum.ts';
 import { ConfirmarConfiguracaoDoSegundoFatorCasoDeUso } from './confirmar-configuracao.caso-de-uso.ts';
 import { IniciarConfiguracaoDoSegundoFatorCasoDeUso } from './iniciar-configuracao.caso-de-uso.ts';
 import { VerificarSegundoFatorCasoDeUso } from './verificar-segundo-fator.caso-de-uso.ts';
@@ -67,6 +76,8 @@ async function cenario() {
     gerador,
     totp,
     emissor,
+    identidade.publicador,
+    identidade.auditoria,
   );
   const verificar = new VerificarSegundoFatorCasoDeUso(
     identidade.unidade,
@@ -80,6 +91,8 @@ async function cenario() {
     gerador,
     totp,
     emissor,
+    identidade.publicador,
+    identidade.auditoria,
   );
   /** O que o `entrar` (etapa 9) faz depois da senha certa no painel. */
   const emitir = () =>
@@ -333,6 +346,151 @@ describe('ConfirmarConfiguracaoDoSegundoFatorCasoDeUso: ordem de "Respostas do 2
   });
 });
 
+describe('ConfirmarConfiguracaoDoSegundoFatorCasoDeUso: freio em espera (S92, P16)', () => {
+  it('a quinta falha da conta publica SegundoFatorFreado só com o id; a senha fica', async () => {
+    const { identidade, confirmar, iniciado } = await cenario();
+    const desafio = await iniciado();
+
+    for (let i = 0; i < 5; i += 1) await confirmar.executar({ desafio, codigo: ERRADO });
+
+    expect(identidade.publicador.publicados).toEqual([
+      expect.objectContaining({
+        tipo: 'identidade.SegundoFatorFreado',
+        agregadoId: CONTA,
+        payload: { contaId: CONTA },
+      }),
+    ]);
+    expect(identidade.contas.dadosDe(CONTA)?.senhaHash).toBe('hash-falso:senha');
+  });
+
+  it('acionado de novo já no nível máximo, sem 2FA concluído: a senha é apagada', async () => {
+    const { identidade, confirmar, iniciado, cifrador } = await cenario();
+    await identidade.bloqueios.salvar(
+      BloqueioDeLogin.reconstituir({
+        chaveHmac: chaveDoFreioDeSegundoFator(cifrador, CONTA),
+        tipo: 'segundo_fator',
+        falhas: 4,
+        nivel: NIVEL_MAXIMO_DO_FREIO,
+        janelaInicio: AGORA,
+        bloqueadoAte: new Date(AGORA.getTime() - 60_000),
+      }),
+    );
+    const desafio = await iniciado();
+
+    await confirmar.executar({ desafio, codigo: ERRADO });
+
+    expect(identidade.contas.dadosDe(CONTA)?.senhaHash).toBeNull();
+    expect(identidade.publicador.tipos).toEqual(['identidade.SegundoFatorFreado']);
+  });
+});
+
+describe('ConfirmarConfiguracaoDoSegundoFatorCasoDeUso: senha apagada revoga as sessões e audita (S104) e teto diário (S103)', () => {
+  const UM_MINUTO = 60_000;
+
+  async function sessaoDoApp(identidade: ReturnType<typeof criarIdentidadeEmMemoria>) {
+    await identidade.sessoes.inserir(
+      Sessao.criar({
+        id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        contaId: CONTA,
+        cliente: 'app_consumidor',
+        tokenHash: 'hash-do-app',
+        mfa: false,
+        agora: AGORA,
+      }),
+    );
+  }
+
+  const daSenhaRemovida = (identidade: ReturnType<typeof criarIdentidadeEmMemoria>) =>
+    identidade.auditoria.entradas.filter((e) => e.acao === 'senha_removida_pelo_freio');
+
+  it('nível máximo de novo: senha apagada, sessões revogadas e auditoria, com o freio por e-mail travado antes do desafio', async () => {
+    const { identidade, confirmar, iniciado, cifrador } = await cenario();
+    await sessaoDoApp(identidade);
+    await identidade.bloqueios.salvar(
+      BloqueioDeLogin.reconstituir({
+        chaveHmac: chaveDoFreioDeSegundoFator(cifrador, CONTA),
+        tipo: 'segundo_fator',
+        falhas: 4,
+        nivel: NIVEL_MAXIMO_DO_FREIO,
+        janelaInicio: AGORA,
+        bloqueadoAte: new Date(AGORA.getTime() - UM_MINUTO),
+      }),
+    );
+    const desafio = await iniciado();
+    const ordem: string[] = [];
+    const chaveDoEmail = chaveDoFreioPorEmail(cifrador, Email.criar('ana.admin@exemplo.com'));
+    const travarFreio = identidade.bloqueios.buscarParaAtualizar.bind(identidade.bloqueios);
+    vi.spyOn(identidade.bloqueios, 'buscarParaAtualizar').mockImplementation(
+      (chave, tipo, agora) => {
+        if (chave === chaveDoEmail) ordem.push('freio_email');
+        return travarFreio(chave, tipo, agora);
+      },
+    );
+    const travarDesafio = identidade.desafios.buscarPorIdParaAtualizar.bind(identidade.desafios);
+    vi.spyOn(identidade.desafios, 'buscarPorIdParaAtualizar').mockImplementation((id) => {
+      ordem.push('desafio');
+      return travarDesafio(id);
+    });
+
+    await confirmar.executar({ desafio, codigo: ERRADO });
+
+    // Uma passada só, com o freio por e-mail travado antes do desafio.
+    expect(ordem).toEqual(['freio_email', 'desafio']);
+    expect(identidade.contas.dadosDe(CONTA)?.senhaHash).toBeNull();
+    expect(identidade.sessoes.todas()).toEqual([
+      expect.objectContaining({ revogadaEm: AGORA, motivoRevogacao: 'segundo_fator_freado' }),
+    ]);
+    expect(daSenhaRemovida(identidade)).toEqual([
+      {
+        atorTipo: 'sistema',
+        atorId: null,
+        acao: 'senha_removida_pelo_freio',
+        recurso: 'conta',
+        recursoId: CONTA,
+        depois: { causa: 'nivel_maximo', sessoesRevogadas: 1, senhaRemovida: true },
+        origem: 'painel',
+      },
+    ]);
+    expect(
+      identidade.desafios.todos().find((d) => d.id === desafio.split('.')[0])?.tentativas,
+    ).toBe(1);
+  });
+
+  it('4 erros a cada 15 min sem espera: 20 no dia não apagam, o 21º apaga e revoga (S103)', async () => {
+    const { identidade, confirmar, iniciado, relogio, freio } = await cenario();
+    await sessaoDoApp(identidade);
+    const rodadas = LIMITE_DE_ERROS_DE_SEGUNDO_FATOR_POR_DIA / 4;
+    for (let rodada = 0; rodada < rodadas; rodada += 1) {
+      relogio.definir(new Date(AGORA.getTime() + rodada * 15 * UM_MINUTO));
+      const desafio = await iniciado();
+      for (let i = 0; i < 4; i += 1) {
+        await expect(confirmar.executar({ desafio, codigo: ERRADO })).resolves.toEqual({
+          tipo: 'codigo_errado',
+        });
+      }
+      expect(freio()?.bloqueadoAte ?? null).toBeNull();
+    }
+    expect(identidade.contas.dadosDe(CONTA)?.senhaHash).toBe('hash-falso:senha');
+    expect(daSenhaRemovida(identidade)).toEqual([]);
+    expect(identidade.publicador.tipos).toEqual([]);
+
+    relogio.definir(new Date(AGORA.getTime() + rodadas * 15 * UM_MINUTO));
+    const desafio = await iniciado();
+    await confirmar.executar({ desafio, codigo: ERRADO });
+
+    expect(identidade.contas.dadosDe(CONTA)?.senhaHash).toBeNull();
+    expect(identidade.sessoes.todas()[0]).toMatchObject({
+      motivoRevogacao: 'segundo_fator_freado',
+    });
+    expect(daSenhaRemovida(identidade)).toEqual([
+      expect.objectContaining({
+        depois: { causa: 'limite_diario', sessoesRevogadas: 1, senhaRemovida: true },
+      }),
+    ]);
+    expect(identidade.publicador.tipos).toEqual(['identidade.SegundoFatorFreado']);
+  });
+});
+
 describe('ConfirmarConfiguracaoDoSegundoFatorCasoDeUso: conta desativada no meio', () => {
   it('a exclusão confirmada entre a leitura da conta e a sessão: desafio_invalido, sem sessão, e nada fica confirmado (A-R8)', async () => {
     const { identidade, confirmar, iniciado, totp } = await cenario();
@@ -353,7 +511,7 @@ describe('ConfirmarConfiguracaoDoSegundoFatorCasoDeUso: conta desativada no meio
 });
 
 describe('ConfirmarConfiguracaoDoSegundoFatorCasoDeUso: travas (R8)', () => {
-  it('lê o segundo fator só depois de travar o desafio e o freio da conta', async () => {
+  it('trava o freio por e-mail, o desafio e o freio da conta, nessa ordem, e só então lê o segundo fator (S104)', async () => {
     const { identidade, confirmar, iniciado, totp } = await cenario();
     const desafio = await iniciado();
     const travaDesafio = vi.spyOn(identidade.desafios, 'buscarPorIdParaAtualizar');
@@ -362,10 +520,12 @@ describe('ConfirmarConfiguracaoDoSegundoFatorCasoDeUso: travas (R8)', () => {
 
     await confirmar.executar({ desafio, codigo: totp.codigoCerto });
 
-    const [desafioPrimeiro] = travaDesafio.mock.invocationCallOrder;
-    const [freioDepois] = travaFreio.mock.invocationCallOrder;
+    expect(travaFreio.mock.calls.map(([, tipo]) => tipo)).toEqual(['email', 'segundo_fator']);
+    const [freioDoEmail, freioDepois] = travaFreio.mock.invocationCallOrder;
+    const [desafioNoMeio] = travaDesafio.mock.invocationCallOrder;
     const [segundoFatorPorUltimo] = leSegundoFator.mock.invocationCallOrder;
-    expect(desafioPrimeiro).toBeLessThan(freioDepois ?? 0);
+    expect(freioDoEmail).toBeLessThan(desafioNoMeio ?? 0);
+    expect(desafioNoMeio).toBeLessThan(freioDepois ?? 0);
     expect(freioDepois).toBeLessThan(segundoFatorPorUltimo ?? 0);
   });
 });

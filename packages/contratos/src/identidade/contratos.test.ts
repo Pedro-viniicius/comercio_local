@@ -515,7 +515,7 @@ describe('eventos v1 da Identidade', () => {
   const contaId = '0199f0a2-7c3e-7d4a-9b1e-123456789abc';
   const eventos = Object.entries(EVENTOS_DE_IDENTIDADE);
 
-  it('são os oito do plano, com tipo "identidade.<Fato>" e versão 1', () => {
+  it('são os nove do plano (com o SegundoFatorFreado do S92), com tipo "identidade.<Fato>" e versão 1', () => {
     expect(eventos.map(([nome]) => nome)).toEqual([
       'ContaCriada',
       'CadastroRepetidoTentado',
@@ -525,6 +525,7 @@ describe('eventos v1 da Identidade', () => {
       'ExportacaoSolicitada',
       'ContaDesativada',
       'ContaAnonimizada',
+      'SegundoFatorFreado',
     ]);
     for (const [nome, evento] of eventos) {
       expect(evento.tipo).toBe(`identidade.${nome}`);

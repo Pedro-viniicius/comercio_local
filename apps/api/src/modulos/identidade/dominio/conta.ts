@@ -5,13 +5,15 @@
 //   `consumidor` (CA-01) e o mesmo login vale nos dois apps (CA-07);
 // - o recadastro de um e-mail existente, verificado ou não, nunca altera a
 //   conta (P1-dono, substitui o S6): `decidirCadastro` só diz que é repetido;
-// - o login vale sem e-mail verificado e grava `ultimo_login_em`;
+// - o login vale sem e-mail verificado e grava `ultimo_login_em` (a renovação
+//   da sessão também grava, etapa 9);
 //   `emailVerificado` vai para a sessão só para a interface (P1-dono);
 // - a redefinição de senha conta como verificação do e-mail;
-// - conta não verificada e sem login há mais de 7 dias é apagada
-//   (`deveSerExpurgada`);
+// - conta não verificada e sem login nem renovação há mais de 7 dias é
+//   apagada (`deveSerExpurgada`);
 // - `admin` nunca é concedido pelo caminho comum (`concederPerfil` recusa) e só
-//   entra no token de sessão do painel com segundo fator (`sessao.ts`);
+//   entra no token de sessão do painel com segundo fator (`sessao.ts`); a conta
+//   admin nasce pela CLI `seed:admin` (`criarAdmin`), sem senha;
 // - exclusão (CA-11): `desativar` na hora; `anonimizar` em até 30 dias, só
 //   depois de desativada, apagando nome, e-mail, telefone e senha.
 //
@@ -60,7 +62,7 @@ export interface DadosDaConta {
 export const DIAS_ATE_EXPURGO_DE_NAO_VERIFICADA = 7;
 /** Prazo para anonimizar a conta desativada (CA-11). */
 export const DIAS_PARA_ANONIMIZAR = 30;
-/** A partir daqui a tarefa de anonimização alerta (etapa 13). */
+/** Passado este prazo desde a desativação, a tarefa de anonimização alerta (etapa 13). */
 export const DIAS_PARA_ALERTA_DE_ANONIMIZACAO = 25;
 /** Nome que fica na conta anonimizada. */
 export const NOME_DA_CONTA_ANONIMIZADA = 'Conta anonimizada';
@@ -119,6 +121,20 @@ export class EmailJaCadastrado extends Error {
   }
 }
 
+/**
+ * O banco recusou apagar a conta (trigger `contas_so_expurgo`, S78, código
+ * 23514): ela não cumpre a regra do expurgo pelo relógio do banco (`now()`).
+ * Uma conta na fronteira dos 7 dias pode passar em `deveSerExpurgada`, que usa
+ * o `agora` da aplicação, e não na trigger: a tarefa trata como "não apagou".
+ * A mensagem não traz dado da conta.
+ */
+export class ContaForaDoExpurgo extends Error {
+  constructor() {
+    super('O banco recusou apagar a conta: ela não cumpre a regra do expurgo.');
+    this.name = 'ContaForaDoExpurgo';
+  }
+}
+
 export interface NovaConta {
   id: string;
   /** Como a pessoa digitou: a conta normaliza e valida (`normalizarNome`, `problemaDoNome`). */
@@ -126,6 +142,16 @@ export interface NovaConta {
   email: Email;
   telefone: Telefone;
   senhaHash: string;
+  agora: Date;
+}
+
+/** Conta admin criada pela CLI `seed:admin`: sem senha, com telefone (CHECK do banco). */
+export interface NovoAdmin {
+  id: string;
+  /** Como foi digitado: a conta normaliza e valida, como no cadastro. */
+  nome: string;
+  email: Email;
+  telefone: Telefone;
   agora: Date;
 }
 
@@ -179,6 +205,35 @@ export class Conta {
       anonimizadaEm: null,
       perfis: [{ perfil: 'consumidor', concedidoEm: nova.agora, concedidoPor: null }],
     });
+  }
+
+  /**
+   * Conta admin da CLI `seed:admin` (CA-07: nenhuma rota concede admin). Nasce
+   * ativa, com os perfis `consumidor` e `admin`, e SEM senha (`senha_hash`
+   * nulo): `podeEntrar` é falso até a primeira redefinição pelo código enviado
+   * ao e-mail, que também verifica o e-mail. Nada de senha aleatória
+   * descartada. Não verificada, mas `deveSerExpurgada` poupa conta `admin`.
+   */
+  static criarAdmin(novo: NovoAdmin): Conta {
+    const nome = normalizarNome(novo.nome);
+    const problema = problemaDoNome(nome);
+    if (problema !== null) throw new NomeInvalido(problema);
+    const conta = new Conta({
+      id: novo.id,
+      nome,
+      emailNormalizado: novo.email.valor,
+      telefoneE164: novo.telefone.valor,
+      senhaHash: null,
+      emailVerificadoEm: null,
+      ultimoLoginEm: null,
+      status: 'ativa',
+      criadaEm: novo.agora,
+      desativadaEm: null,
+      anonimizadaEm: null,
+      perfis: [{ perfil: 'consumidor', concedidoEm: novo.agora, concedidoPor: null }],
+    });
+    conta.concederAdmin(novo.agora);
+    return conta;
   }
 
   /** Remonta a conta a partir do que o repositório leu. */
@@ -252,7 +307,10 @@ export class Conta {
     return this.#status === 'ativa' && this.#senhaHash !== null;
   }
 
-  /** Login com sucesso: grava `ultimo_login_em` (P1-dono, base do expurgo). */
+  /**
+   * Login (ou renovação de sessão) com sucesso: grava `ultimo_login_em`
+   * (P1-dono, base do expurgo: último login ou renovação).
+   */
   registrarLogin(agora: Date): void {
     this.#exigirAtiva('registrarLogin');
     this.#ultimoLoginEm = new Date(agora.getTime());
@@ -329,8 +387,29 @@ export class Conta {
   }
 
   /**
-   * Conta não verificada e sem login há mais de 7 dias (P1-dono): a tarefa
-   * diária a apaga. Sem login nenhum, conta desde o cadastro. Nunca apaga conta
+   * Início do alerta da anonimização: `prazoDeAnonimizacao` menos 5 dias, ou
+   * seja, 25 dias depois de `desativada_em` (`DIAS_PARA_ALERTA_DE_ANONIMIZACAO`).
+   * Conta pela desativação, nunca pela data do pedido: a exclusão que aguardou
+   * pendências reaproveita a solicitação antiga, e o CA-11 conta os 30 dias da
+   * desativação. `null` se a conta não está desativada.
+   */
+  get inicioDoAlertaDeAnonimizacao(): Date | null {
+    const prazo = this.prazoDeAnonimizacao;
+    if (prazo === null) return null;
+    const folga = (DIAS_PARA_ANONIMIZAR - DIAS_PARA_ALERTA_DE_ANONIMIZACAO) * UM_DIA_EM_MS;
+    return new Date(prazo.getTime() - folga);
+  }
+
+  /** A conta desativada passou de 25 dias sem anonimização: a tarefa alerta. */
+  deveAlertarAnonimizacao(agora: Date): boolean {
+    const inicio = this.inicioDoAlertaDeAnonimizacao;
+    return inicio !== null && agora.getTime() > inicio.getTime();
+  }
+
+  /**
+   * Conta não verificada e sem login nem renovação há mais de 7 dias
+   * (P1-dono): a tarefa diária a apaga. A referência é o último login ou
+   * renovação (`ultimo_login_em`); sem nenhum, o cadastro. Nunca apaga conta
    * com perfil `admin` (criada pela CLI e verificada só na primeira
    * redefinição) nem `lojista` (tem loja da fatia 2), nem conta já em exclusão.
    */

@@ -41,6 +41,12 @@ export const EVENTOS_DE_IDENTIDADE = {
   ContaDesativada: definirEvento('ContaDesativada', { contaId }),
   /** Dados pessoais da conta anonimizados (CA-11). */
   ContaAnonimizada: definirEvento('ContaAnonimizada', { contaId }),
+  /**
+   * O freio de segundo fator da conta entrou numa espera (S92): o assinante
+   * avisa o dono por e-mail. Se a senha foi apagada por isso (nível máximo,
+   * P16), o aviso manda recuperar a senha; o assinante lê isso da conta.
+   */
+  SegundoFatorFreado: definirEvento('SegundoFatorFreado', { contaId }),
 };
 
 export type NomeDoEventoDeIdentidade = keyof typeof EVENTOS_DE_IDENTIDADE;

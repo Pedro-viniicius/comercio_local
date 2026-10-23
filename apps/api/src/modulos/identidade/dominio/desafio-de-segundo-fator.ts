@@ -23,6 +23,23 @@ export const VALIDADE_DO_DESAFIO_EM_MS = 5 * 60 * 1000;
 /** Tentativas por desafio (S1). */
 export const TENTATIVAS_POR_DESAFIO = 5;
 
+/**
+ * Teto diário de erros de segundo fator por conta (S103; decisão do dono de
+ * 2026-10-21): somadas as tentativas erradas dos desafios da conta, das duas
+ * etapas, emitidos nas últimas 24 h, passar de 20 tem a mesma reação do freio
+ * acionado de novo no nível máximo (P16: senha apagada, sessões revogadas e
+ * aviso por e-mail). Fecha o caminho de quem erra 4 vezes a cada 15 min, sem
+ * nunca pôr o freio em espera.
+ */
+export const LIMITE_DE_ERROS_DE_SEGUNDO_FATOR_POR_DIA = 20;
+/** Janela do teto diário (`LIMITE_DE_ERROS_DE_SEGUNDO_FATOR_POR_DIA`): as últimas 24 h. */
+export const JANELA_DO_LIMITE_DE_ERROS_DE_SEGUNDO_FATOR_EM_MS = 24 * 60 * 60 * 1000;
+
+/** Os erros de segundo fator das últimas 24 h passaram do teto diário (S103): 21 ou mais. */
+export function passouDoLimiteDiarioDeSegundoFator(errosNasUltimas24h: number): boolean {
+  return errosNasUltimas24h > LIMITE_DE_ERROS_DE_SEGUNDO_FATOR_POR_DIA;
+}
+
 export interface DadosDoDesafioDeSegundoFator {
   readonly id: string;
   readonly contaId: string;

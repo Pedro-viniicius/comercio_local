@@ -312,6 +312,7 @@ describe('senha trocada durante a conferência (S91)', () => {
     await gate.chegou;
     expect(
       await b.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '135790',
         novaSenha: OUTRA_SENHA,
@@ -335,6 +336,7 @@ describe('senha trocada durante a conferência (S91)', () => {
     await gate.chegou;
     expect(
       await b.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '246802',
         novaSenha: OUTRA_SENHA,
@@ -367,6 +369,7 @@ describe('a conta sai de ativa no meio: a porta devolve false e a transação de
     for (let i = 0; i < 2; i++) {
       expect(
         await a.casos.redefinirSenha.executar({
+          ip: ipNovo(),
           email: admin.email,
           codigo: '000000',
           novaSenha: OUTRA_SENHA,
@@ -377,6 +380,7 @@ describe('a conta sai de ativa no meio: a porta devolve false e a transação de
 
     const pausa = pausarAntes(a.repos.contas, 'gravarSenhaRedefinida');
     const redefinicao = a.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: admin.email,
       codigo: '112233',
       novaSenha: OUTRA_SENHA,
@@ -567,6 +571,7 @@ describe('a redefinição invalida os desafios do 2FA (S94)', () => {
     await inserirCodigo(a, admin.conta.id, 'recuperacao_senha', '908070');
     expect(
       await b.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: admin.conta.email,
         codigo: '908070',
         novaSenha: OUTRA_SENHA,
@@ -597,6 +602,7 @@ describe('a redefinição invalida os desafios do 2FA (S94)', () => {
     await inserirCodigo(a, conta.id, 'recuperacao_senha', '564738');
     expect(
       await b.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '564738',
         novaSenha: OUTRA_SENHA,
@@ -623,7 +629,12 @@ describe('a redefinição invalida os desafios do 2FA (S94)', () => {
     });
     await pausa.chegou;
     const redefinicao = b.casos.redefinirSenha
-      .executar({ email: admin.conta.email, codigo: '102938', novaSenha: OUTRA_SENHA })
+      .executar({
+        ip: ipNovo(),
+        email: admin.conta.email,
+        codigo: '102938',
+        novaSenha: OUTRA_SENHA,
+      })
       .then(
         (resultado) => resultado,
         (erro: unknown) => ({ tipo: 'erro', erro }) as const,

@@ -30,8 +30,14 @@ Painel do grupo C (rodada 2, 2026-10-19): S90 (Vercel sem os cabeçalhos do Cadd
 
 - 2026-10-19, A-R12 (decisão do dono em `docs/produto/decisoes.md`): com a reserva da tentativa (S91), o login com a senha certa conta provisoriamente como falha no freio de IP; a 50ª reserva, ou muitos logins simultâneos atrás do mesmo CGNAT, freia a origem por 1 min para novos logins (falha fechada). **Reabre se:** houver queixa medida de bloqueio em rede de operadora, ou se o estorno (`estornarFalha`) deixar de rodar no sucesso.
 
-P16 (2026-10-19) é decisão confirmada, não aceite: senha do admin apagada no nível máximo do freio de 2FA e teto de 10 códigos por 24 h, na etapa 13 (S92, S93 seguem abertos até lá).
+P16 (2026-10-19) e a decisão de 2026-10-21 (S102: sem nome em e-mail não verificado; S103: teto de 20 erros de 2FA em 24 h com a reação do nível máximo) são decisões do dono, não aceites; implementadas na etapa 13 (rodada 2).
 
 Ao registrar um aceite: data, ID do achado, mitigação declarada e o fato que reabriria.
 
 Relacionado: [[areas-sensiveis]]
+
+Etapa 13 do 01b (rodada 1, 2026-10-21): sem aceite novo do dono. Desvios do dev avaliados como não achado: dedup do S15 em `bloqueios_login` (chave com prefixo própria, retenção apaga 30 min depois de vencer); expurgo com `FOR NO KEY UPDATE`; código certo da verificação de e-mail não zera o freio por e-mail; verificação de e-mail somando no mesmo freio do login (o travamento direcionado do e-mail já existe pelo login público, aceito pelo brief no CA-04). P16 continua decisão, não aceite; o teto diário do S92 não foi atingido (S103).
+
+Etapa 13 do 01b (rodada 2, 2026-10-21): sem aceite novo. Avaliados como residual BAIXA, não aceite: reincidência do teto diário depois da redefinição; corrida do refazer da tentativa de 2FA com login concorrente; primeiro admin em corrida no `seed:admin` (INFORMATIVA). Se o dono aceitar a reincidência, registrar aqui com o fato que reabre (queixa de admin travado, ou atacante que consiga gerar erro de 2FA sem a senha nova).
+
+Etapa 13 do 01b (rodada 3, 2026-10-22): sem aceite novo. O dono decidiu (decisoes.md, 2026-10-21, "Complemento (Q29)") que a redefinição apaga os desafios e zera o teto diário: é decisão, não aceite. Os três residuais da rodada 2 foram fechados no código (Q29, trava do primeiro `seed:admin`, 2FA sem refazer). Consequência conhecida da decisão: quem controla o e-mail do admin ganha ~21 erros de 2FA por redefinição (teto de 10 códigos/24 h, ~210/dia). Vira achado se o teto de códigos de recuperação subir ou sumir, se o freio de segundo fator passar a zerar na redefinição, ou se outro caminho além da redefinição com código certo apagar desafios.

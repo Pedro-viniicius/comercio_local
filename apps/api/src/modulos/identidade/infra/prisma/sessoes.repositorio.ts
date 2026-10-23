@@ -8,7 +8,9 @@
 //   (S77) na mesma transação;
 // - `atualizar`: só a revogação, com `coalesce`, para a primeira revogação
 //   ficar e nada da rotação ser rebaixado.
-// As revogações em lote mudam só as sessões ainda não revogadas.
+// As revogações em lote mudam só as sessões ainda não revogadas. A retenção
+// (`apagarEncerradasAntes`, S81) apaga as encerradas há 30 dias, e o histórico
+// delas sai pela FK em cascata.
 import { Injectable } from '@nestjs/common';
 import type {
   Sessao as SessaoPrisma,
@@ -31,6 +33,7 @@ const MOTIVOS_DE_REVOGACAO: ReadonlySet<string> = new Set<MotivoDeRevogacao>([
   'conta_desativada',
   'substituida',
   'segundo_fator_reconfigurado',
+  'segundo_fator_freado',
 ]);
 
 @Injectable()
@@ -132,6 +135,11 @@ export class RepositorioDeSessoesPrisma extends RepositorioDeSessoes {
   override async apagarDaConta(contaId: string): Promise<void> {
     if (!ehUuid(contaId)) return;
     await this.unidade.cliente().sessao.deleteMany({ where: { contaId } });
+  }
+
+  override apagarEncerradasAntes(limite: Date): Promise<number> {
+    return this.unidade.cliente().$executeRaw`
+      DELETE FROM identidade.sessoes WHERE coalesce(revogada_em, expira_em) < ${limite}`;
   }
 }
 

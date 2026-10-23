@@ -1,0 +1,33 @@
+---
+name: etapa-13-assinantes-tarefas
+description: Grupo D do 01b (etapa 13: assinantes, tarefas diárias, seed:admin, S92/S93), rodadas 1 e 2 em 2026-10-21: testes do qa, mutação, Q26-Q28 fechados, Q29 baixo aberto
+metadata:
+  type: project
+---
+
+Rodada 1 (2026-10-21): sem bug alto nem médio; 24 testes unitários e 8 de integração novos, tudo verde (api 1442, integração 382, estável em 2 execuções). Veredito: APROVADO COM RESSALVAS (Q26, Q27, Q28 baixos).
+
+Testes do qa (arquivos novos, não editei os do dev):
+- `apps/api/test/integracao/identidade/assinantes-tarefas-corridas.int.test.ts` (8): aviso de cadastro repetido simultâneo (duas pilhas, `pausarDepois(bloqueios,'buscarParaAtualizar')`), tarefa de anonimização contra o banco (alerta só da de 26 dias, `aguardando_pendencias` fica, idempotente, duas execuções simultâneas com `pausarDepois(contas,'buscarPorIdParaAtualizar')`), escada inteira do freio de 2FA (1, 5, 15 min, `freado` na espera, 4ª espera apaga a senha, recuperação devolve o acesso) sem UPDATE na tabela, seed:admin simultâneo (um `criado`, outro `email_ja_cadastrado`, auditoria real sem dado pessoal), código de recuperação aos 30 min (±1 ms), expurgo leva todas as tabelas filhas, evento chegando depois do expurgo. Os dois de expurgo ficam por último de propósito (o expurgo roda na tabela inteira com o `now()` do banco: contas de `T0` com mais de 7 dias seriam levadas por ele).
+- `apps/api/src/modulos/identidade/aplicacao/assinantes/assinantes.contrato.test.ts` (matriz evento -> assinante único; payload com e-mail a mais recusado nos 6 casos), `.../infra/email/modelos/modelos-hostis.test.ts` (nomes hostis não mudam a contagem de `< > " '` nem criam `&` solto; "30 minutos" = `VALIDADE_DO_CODIGO_EM_MS`), `apps/api/test/logs-das-tarefas-da-identidade.test.ts` (logger real do projeto: alerta dos 25 dias chega à linha com `contaId` e prazo, sem nome/e-mail/telefone), `apps/api/test/fronteiras/admin-so-pela-cli.test.ts` (varre o `src`: só `Conta` chama `concederAdmin`, só `CriarAdminCasoDeUso` chama `criarAdmin`, nada em `http/` importa a CLI; vale para a etapa 16).
+
+Armadilhas: teste em `aplicacao/` que importa `compartilhado/log/logger.ts` quebra a regra `aplicacao-nao-importa-adaptador-do-nucleo` do `deps:verificar`; vá para `apps/api/test/`. `eventos.ocorrido_em` com `RelogioFixo` igual: ordene por tempo diferente entre eventos do mesmo tipo da mesma conta. O redator do log engole chave `nome`/`token`/`mail` (mutante "nome no log" sobrevive de forma equivalente); chave neutra (`detalhe`) com e-mail vaza e o teste pega.
+
+Mutação (cópia no scratchpad, 14 de integração e 14 de unidade, todos mortos menos equivalentes: nome no log pelo redator e `String(erro)` do `FalhaNaAnonimizacao`). Procedimento em `como-rodar-testes`.
+
+Bugs baixos (sondas em `/tmp/claude-1000/-home-ufla-Documentos-comercio-local/94615612-ec58-48c0-ac04-d2e0d1ef0d19/scratchpad/sondas/`, podem ter sumido):
+- Q26: `AnonimizarContasTarefa` não tenta a 101ª exclusão se as 100 primeiras (por `solicitada_em`) falham sempre (`novas === 0` encerra o laço; com 101 pendentes, 100 falhando, a 101ª fica `desativada` e o alerta dos 25 dias não cobre ela). Só aparece com 100+ falhas persistentes.
+- Q27: duas emissões simultâneas de código para a mesma conta (dois workers) deixam 2 códigos vigentes e mandam 2 e-mails ("só o último vale" e o teto de 10 sem trava); o `buscarVigenteParaAtualizar` escolhe por `criado_em`, então o código do e-mail mais novo pode não ser o aceito. O dev já apontou o teto; falta unique parcial ou trava da conta na emissão.
+- Q28 (texto): o e-mail de exportação diz só a data (`até 28/10/2026`), mas a cópia vence na hora da geração + 7 dias; no último dia, depois dessa hora, já não baixa.
+
+Lacunas: `seed:admin` válido só roda de ponta a ponta na etapa 16 (hoje dá `UnknownElementException`, sem vazar nome, e-mail ou telefone: sondado com `dist/cli/seed-admin.js` e `--env-file=.env.example`); registro dos assinantes/tarefas e fila no worker (16); senha apagada pelo freio não revoga sessões abertas do app (P16, dev já apontou); teto de 10 códigos pode travar a recuperação de quem é alvo de pedidos de terceiros (3/h por e-mail no HTTP, etapa 16).
+
+**How to apply:** na rodada 2, `pnpm --filter api test:integracao -- assinantes-tarefas-corridas retencao assinantes` e a suíte inteira; se o dev corrigir Q26/Q27, copie as sondas do scratchpad para `apps/api/test/` (Q26) e para `apps/api/test/integracao/identidade/` (Q27) e transforme em teste verde.
+
+## Rodada 2 (2026-10-21)
+Q26, Q27, Q28 e S102-S108/R1-R5 conferidos: api 1477, contratos 623, integração 391 (2x estável). Veredito APROVADO COM RESSALVAS (Q29 baixo: reincidência do teto diário, S103: depois de redefinir a senha, 1 erro de 2FA apaga a senha de novo porque a soma das 24 h não olha a troca de senha; sonda em scratchpad `sondas/sonda-q29-reincidencia.int.test.ts`, pode ter sumido).
+Teste novo do qa: `apps/api/test/integracao/identidade/teto-diario-de-segundo-fator.int.test.ts` (20 não apagam, 21º apaga, revoga sessão do app -> `invalida`, auditoria `limite_diario`; borda de 24 h exata com `gt`; código certo após 20 erros). A auditoria é somente acréscimo: teste de integração não consegue apagar `compartilhado.auditoria` (só o globalSetup recria).
+Mutação: 17 mutantes todos mortos (>=, janela 25 h, `gte`, só a etapa verificar, revogação removida, cursor das duas tarefas, travarEmissao no-op, cursor Prisma das solicitações e do expurgo, saudação com nome, hora do e-mail, operador do seed:admin). Filtro da integração é trecho do nome do arquivo sem `.int` (`repositorios`, não `repositorios.int`). Na cópia, 2 testes de fronteiras falham sempre (artefato da cópia), ignore.
+
+## Rodada 3 (2026-10-22)
+Q29, S106, simplificação da trava do 2FA (ex-S104) e R7 conferidos: api 1481, integração 394 (2x estável), lint, typecheck e deps ok. Veredito APROVADO. A sonda do Q29 foi promovida com mais força (confere desafios apagados e o estado final inteiro). Mutação (10 mutantes na cópia): Q29 volta a invalidar, só apaga `verificar`, sem filtro de finalidade, sem filtro de conta, trava do admin no-op, trava depois do ator, sem HMAC, sem trava do freio e sem salvar: todos mortos. Sobrevive só "não confere `desafio.contaId !== contaDoDesafio`" (equivalente: a conta é amarrada ao HMAC e a linha não muda). Armadilha: outro agente (revisor/seguranca) pode rodar a integração no mesmo banco ao mesmo tempo; "deadlock detected" em `limparBanco` ou dezenas de falhas ao mesmo tempo é colisão, não mutante: cheque `pgrep -af vitest` e repita sozinho. Não use `until pgrep -f <texto>` que case com o próprio comando.

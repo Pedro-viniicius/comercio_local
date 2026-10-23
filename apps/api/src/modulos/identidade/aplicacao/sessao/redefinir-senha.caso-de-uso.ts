@@ -8,26 +8,31 @@
 //
 // Ordem, numa transação só:
 // 1. trava o freio por e-mail (S14: o código da redefinição soma no mesmo
-//    freio do login e da exclusão). Freio ativo devolve `freado` sem conferir o
-//    código;
+//    freio do login e da exclusão) e depois o por origem (S93: o código errado
+//    soma também no freio de IP, com a mesma chave do login; sem IP válido,
+//    `ORIGEM_DESCONHECIDA`). Qualquer um ativo devolve `freado` com a maior
+//    espera, sem conferir o código;
 // 2. lê a conta só depois do freio travado. A exclusão trava o mesmo freio
 //    antes de desativar a conta, e o login antes de gravar o login, então a
 //    conta gravada inteira no passo 4 não ressuscita uma conta desativada nem
 //    desfaz uma mudança confirmada no meio;
 // 3. trava o código de recuperação vigente da conta e confere: errado, vencido,
 //    já usado ou esgotado (e e-mail sem conta, ou conta fora de `ativa`) somam
-//    uma falha no freio e devolvem `codigo_invalido`, sem distinguir. A
+//    uma falha nos dois freios e devolvem `codigo_invalido`, sem distinguir. A
 //    tentativa errada fica gravada;
-// 4. código certo (uso único, 30 min; CA-06): zera o freio, invalida os
-//    desafios do 2FA ainda vivos das duas etapas (S94: quem tinha a senha
-//    antiga e já passou dela não conclui o segundo fator), grava o hash novo e
+// 4. código certo (uso único, 30 min; CA-06): zera o freio por e-mail (o de
+//    origem nunca zera por sucesso), apaga os desafios do 2FA da conta, das
+//    duas etapas (S94: quem tinha a senha antiga e já passou dela não conclui
+//    o segundo fator; Q29: o teto diário de erros do 2FA, que soma as
+//    tentativas desses desafios, recomeça com a senha nova), grava o hash novo e
 //    verifica o e-mail (`gravarSenhaRedefinida`, só essas colunas e só em conta
 //    ativa, S95; P1-dono), revoga todas as sessões da conta com
 //    `senha_redefinida` (CA-05, S8), inclusive as de quem criou a conta antes
 //    com o e-mail de outra pessoa, e publica `SenhaRedefinida`. Se a conta
 //    saiu de `ativa` no meio, tudo é desfeito (inclusive o uso do código) e a
 //    resposta é `codigo_invalido`.
-// Travas na ordem freio → código → desafios → conta → sessões, compatível com
+// Travas na ordem freio por e-mail → freio de origem → código → desafios →
+// conta → sessões, compatível com
 // a do cabeçalho de `dominio/repositorios.ts` (o segundo fator trava o desafio
 // antes de gravar o login na conta). Não emite sessão (a rota responde 204): a
 // pessoa entra de novo com a senha nova, nunca com `admin` nem `mfa` vindos
@@ -36,6 +41,7 @@ import { Injectable } from '@nestjs/common';
 import { PublicadorDeEventos } from '../../../../compartilhado/eventos/publicador.ts';
 import { Relogio } from '../../../../compartilhado/tempo/relogio.ts';
 import { UnidadeDeTrabalho } from '../../../../compartilhado/transacao/unidade-de-trabalho.ts';
+import { type BloqueioDeLogin, maiorEspera } from '../../dominio/bloqueio-de-login.ts';
 import { Email } from '../../dominio/email.ts';
 import {
   RepositorioDeBloqueios,
@@ -48,23 +54,27 @@ import { chaveDoFreioPorEmail } from '../comum/chaves.ts';
 import { eventoDeIdentidade } from '../eventos.ts';
 import { Cifrador } from '../portas/cifrador.ts';
 import { Hasher } from '../portas/hasher.ts';
+import { chaveDoFreioPorOrigem } from './comum.ts';
 
 /**
  * Corpo já validado por `redefinirSenhaSchema`: e-mail normalizado, código de
  * 6 dígitos e senha nova como foi digitada (a lista pública de senhas comuns é
- * conferida na rota, etapa 16).
+ * conferida na rota, etapa 16). O `ip` vem do cabeçalho confiável do proxy
+ * (etapa 16), como no login; ausente ou inválido, conta como
+ * `ORIGEM_DESCONHECIDA` (S93).
  */
 export interface EntradaDeRedefinirSenha {
   readonly email: string;
   readonly codigo: string;
   readonly novaSenha: string;
+  readonly ip: string | null | undefined;
 }
 
 /**
  * - `redefinida`: senha trocada e sessões revogadas (204);
  * - `codigo_invalido`: o mesmo para todos os motivos, inclusive e-mail sem
  *   conta (400 com `campos[codigo].invalido`);
- * - `freado`: freio por e-mail ativo (429 com `Retry-After` =
+ * - `freado`: freio por e-mail ou por origem ativo (429 com `Retry-After` =
  *   `segundosDeEspera`), código não conferido.
  */
 export type ResultadoDeRedefinirSenha =
@@ -104,7 +114,7 @@ export class RedefinirSenhaCasoDeUso {
     const agora = this.relogio.agora();
     try {
       return await this.unidade.executar(() =>
-        this.#redefinir(email, entrada.codigo, novoHash, agora),
+        this.#redefinir(email, entrada.codigo, entrada.ip, novoHash, agora),
       );
     } catch (erro) {
       if (erro instanceof ContaIndisponivelNoMeio) return CODIGO_INVALIDO;
@@ -115,6 +125,7 @@ export class RedefinirSenhaCasoDeUso {
   async #redefinir(
     email: Email,
     codigo: string,
+    ip: string | null | undefined,
     novoHash: string,
     agora: Date,
   ): Promise<ResultadoDeRedefinirSenha> {
@@ -123,8 +134,16 @@ export class RedefinirSenhaCasoDeUso {
       'email',
       agora,
     );
-    if (freio.estaBloqueado(agora)) {
-      return { tipo: 'freado', segundosDeEspera: freio.segundosDeEspera(agora) };
+    const freioDaOrigem = await this.bloqueios.buscarParaAtualizar(
+      chaveDoFreioPorOrigem(this.cifrador, ip),
+      'ip',
+      agora,
+    );
+    const freios = [freio, freioDaOrigem];
+    if (freios.some((f) => f.estaBloqueado(agora))) {
+      const segundosDeEspera = maiorEspera(freios, agora);
+      await this.#salvar(freios);
+      return { tipo: 'freado', segundosDeEspera };
     }
 
     const conta = await this.contas.buscarPorEmail(email);
@@ -132,11 +151,7 @@ export class RedefinirSenhaCasoDeUso {
       conta?.status === 'ativa'
         ? await this.codigos.buscarVigenteParaAtualizar(conta.id, 'recuperacao_senha', agora)
         : null;
-    if (conta === null || registro === null) {
-      freio.registrarFalha(agora);
-      await this.bloqueios.salvar(freio);
-      return CODIGO_INVALIDO;
-    }
+    if (conta === null || registro === null) return this.#falhar(freios, agora);
 
     const confere = this.cifrador.hmacConfere(
       'recuperacao_senha',
@@ -145,17 +160,15 @@ export class RedefinirSenhaCasoDeUso {
     );
     const resultado = registro.conferir(confere, agora);
     await this.codigos.atualizar(registro);
-    if (resultado !== 'aceito') {
-      freio.registrarFalha(agora);
-      await this.bloqueios.salvar(freio);
-      return CODIGO_INVALIDO;
-    }
+    if (resultado !== 'aceito') return this.#falhar(freios, agora);
     freio.registrarSucesso('senha');
-    await this.bloqueios.salvar(freio);
+    await this.#salvar(freios);
 
     // Antes da conta: o segundo fator trava o desafio e depois grava o login (S94).
-    await this.desafios.invalidarVigentes(conta.id, 'configurar', agora);
-    await this.desafios.invalidarVigentes(conta.id, 'verificar', agora);
+    // Apagar, e não só invalidar, zera a soma do teto diário (Q29). O marco não
+    // pode ser o uso do código de recuperação: qualquer um pede código novo pela
+    // rota pública, e `invalidarVigentes` grava `usado_em` no anterior.
+    await this.desafios.apagarDaConta(conta.id);
     // Só a senha e a verificação, e só com a conta ainda ativa (S95, P1-dono).
     if (!(await this.contas.gravarSenhaRedefinida(conta.id, novoHash, agora))) {
       throw new ContaIndisponivelNoMeio();
@@ -163,5 +176,20 @@ export class RedefinirSenhaCasoDeUso {
     await this.sessoes.revogarDaConta(conta.id, 'senha_redefinida', agora);
     await this.publicador.publicar(eventoDeIdentidade('SenhaRedefinida', { contaId: conta.id }));
     return { tipo: 'redefinida' };
+  }
+
+  /** Código que não serve: uma falha em cada freio (e-mail e origem), gravada. */
+  async #falhar(
+    freios: readonly BloqueioDeLogin[],
+    agora: Date,
+  ): Promise<ResultadoDeRedefinirSenha> {
+    for (const f of freios) f.registrarFalha(agora);
+    await this.#salvar(freios);
+    return CODIGO_INVALIDO;
+  }
+
+  /** Grava os freios, ou apaga a linha zerada que `buscarParaAtualizar` criou. */
+  async #salvar(freios: readonly BloqueioDeLogin[]): Promise<void> {
+    for (const f of freios) await this.bloqueios.salvar(f);
   }
 }

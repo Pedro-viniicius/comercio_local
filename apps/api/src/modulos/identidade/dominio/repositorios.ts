@@ -40,13 +40,19 @@
 // gravasse a rotação antes de `gravarUltimoLogin` cruzaria com a exclusão, e o
 // Postgres abortaria uma das duas (40P01). Pelo mesmo motivo, os desafios do
 // 2FA vêm antes da conta: o segundo fator trava o desafio e só depois grava o
-// login, então a redefinição de senha invalida os desafios (S94) antes de
+// login, então a redefinição de senha apaga os desafios (S94, Q29) antes de
 // gravar a senha nova. Juntando tudo, quem trava o freio por e-mail o trava
 // antes de qualquer outra coisa: freio por e-mail → (freio de origem, no login)
 // → código ou desafios → freio de segundo fator → segundo fator → conta →
-// sessões. É assim no login, na redefinição, na exclusão e na CLI de
-// reconfiguração do 2FA (A-R13), que trava o freio por e-mail da conta para
-// serializar com o login que já conferiu a senha antiga.
+// sessões. É assim no login, na redefinição, na exclusão, na verificação de
+// e-mail (S93), na CLI de reconfiguração do 2FA (A-R13) e nas tentativas de
+// segundo fator (S104, que podem apagar a senha): as duas últimas travam o
+// freio por e-mail da conta para serializar com o login que já conferiu a
+// senha antiga; no 2FA, a conta vem do desafio lido antes sem trava
+// (`RepositorioDeDesafios.buscarPorId`). A emissão de códigos por e-mail usa
+// uma trava à parte, por conta e finalidade (`travarEmissao`), e a criação de
+// admin pela CLI outra, única (`travarCriacaoDeAdmin`); ninguém as pede junto
+// com as outras.
 import type { EtapaDoDesafio } from '@bairrin/contratos/validadores';
 import type { BloqueioDeLogin, TipoDeBloqueio } from './bloqueio-de-login.ts';
 import type { CodigoDeVerificacao, FinalidadeDoCodigo } from './codigo-de-verificacao.ts';
@@ -150,16 +156,43 @@ export abstract class RepositorioDeContas {
    */
   abstract gravarDesativacao(id: string, quando: Date): Promise<boolean>;
   /**
+   * Se há alguma conta ativa com o perfil `admin` (S106: depois do primeiro
+   * admin, a CLI `seed:admin` exige um operador admin ativo).
+   */
+  abstract existeAdminAtivo(): Promise<boolean>;
+  /**
+   * Serializa a criação de admin pela CLI `seed:admin` até o fim da unidade de
+   * trabalho, para duas execuções simultâneas sem admin ativo não criarem
+   * dois admins com ator `sistema` (S106):
+   *
+   *     SELECT pg_advisory_xact_lock(hashtextextended('identidade.criar_admin', 0))
+   *
+   * Chamado dentro da unidade de trabalho, antes de `existeAdminAtivo`. A
+   * segunda execução espera a primeira terminar e lê o admin que ela criou.
+   */
+  abstract travarCriacaoDeAdmin(): Promise<void>;
+  /**
    * Ids de contas que `Conta.deveSerExpurgada` apagaria: ativas, sem e-mail
    * verificado, sem perfil `admin` nem `lojista` e com o último login (ou, sem
    * login, o cadastro) antes de `limite` (`limiteDoExpurgo`). No máximo
-   * `quantidade`, das mais antigas para as mais novas.
+   * `quantidade`, em ordem de id; com `depoisDe`, só os ids maiores que ele
+   * (paginação por cursor, S105: uma conta que a trigger recusou e continua na
+   * regra não prende a tarefa no mesmo lote).
    */
-  abstract listarParaExpurgo(limite: Date, quantidade: number): Promise<string[]>;
+  abstract listarParaExpurgo(
+    limite: Date,
+    quantidade: number,
+    depoisDe?: string | null,
+  ): Promise<string[]>;
   /**
    * Apaga a conta não verificada e o que depende dela no schema (perfis,
-   * sessões, códigos, consentimentos, segundo fator, solicitações e
-   * exportações), na transação em andamento (P1-dono, S8).
+   * sessões e o histórico de tokens delas, códigos, consentimentos, segundo
+   * fator, solicitações e exportações), na transação em andamento (P1-dono,
+   * S8). Conta inexistente não é erro. A trigger `contas_so_expurgo` (S78)
+   * recusa apagar conta fora da regra do expurgo, contando o tempo com o
+   * `now()` do banco: o adaptador lança `ContaForaDoExpurgo`. Esse erro aborta
+   * a transação no Postgres, então quem chama apaga cada conta numa unidade
+   * própria e trata o erro fora dela.
    */
   abstract apagar(id: string): Promise<void>;
 }
@@ -229,6 +262,17 @@ export abstract class RepositorioDeSessoes {
   abstract revogarDaConta(contaId: string, motivo: MotivoDeRevogacao, agora: Date): Promise<number>;
   /** Apaga as sessões da conta e, em cascata, o histórico de tokens delas (anonimização). */
   abstract apagarDaConta(contaId: string): Promise<void>;
+  /**
+   * Retenção (S81, P12): apaga as sessões revogadas ou vencidas antes de
+   * `limite` (a tarefa passa `agora` menos 30 dias), e com elas, pela FK em
+   * cascata, o histórico de tokens usados (a aplicação não tem DELETE em
+   * `tokens_de_renovacao_usados`):
+   *
+   *     DELETE FROM identidade.sessoes WHERE coalesce(revogada_em, expira_em) < $1
+   *
+   * Devolve quantas sessões apagou.
+   */
+  abstract apagarEncerradasAntes(limite: Date): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +301,43 @@ export abstract class RepositorioDeCodigosDeVerificacao {
   ): Promise<void>;
   /** Apaga os códigos e os desafios da conta (anonimização). */
   abstract apagarDaConta(contaId: string): Promise<void>;
+  /**
+   * Serializa a emissão de códigos da conta e da finalidade (Q27, S107) até o
+   * fim da unidade de trabalho:
+   *
+   *     SELECT pg_advisory_xact_lock(hashtextextended('<conta>:<finalidade>', 0))
+   *
+   * Duas entregas simultâneas para a mesma conta (mais de uma máquina de
+   * worker) contariam o teto e invalidariam os vigentes ao mesmo tempo, e os
+   * dois códigos ficariam valendo. Com a trava, a segunda espera a primeira
+   * terminar, conta o código dela e o invalida. A trava é de outro recurso
+   * (não de uma linha): quem confere o código (`buscarVigenteParaAtualizar`)
+   * não a pede, então não cruza com a ordem das travas do cabeçalho. Chamado
+   * dentro da unidade de trabalho, antes de `contarEmitidosDesde`.
+   */
+  abstract travarEmissao(contaId: string, finalidade: FinalidadeDoCodigo): Promise<void>;
+  /**
+   * Quantos códigos da conta e da finalidade foram emitidos depois de `desde`
+   * (`criado_em > desde`), usados ou não. O assinante confere o teto de 10 por
+   * 24 h (S93, P16) antes de emitir. A retenção (`apagarEncerradosAntes`, 1
+   * dia depois do uso ou do vencimento) nunca apaga um código emitido nas
+   * últimas 24 h, então a contagem não perde nenhum.
+   */
+  abstract contarEmitidosDesde(
+    contaId: string,
+    finalidade: FinalidadeDoCodigo,
+    desde: Date,
+  ): Promise<number>;
+  /**
+   * Retenção (S81, P12): apaga os códigos por e-mail e os desafios do 2FA (a
+   * mesma tabela) usados ou vencidos antes de `limite` (a tarefa passa `agora`
+   * menos 1 dia):
+   *
+   *     DELETE FROM identidade.codigos_verificacao WHERE coalesce(usado_em, expira_em) < $1
+   *
+   * Devolve quantas linhas apagou.
+   */
+  abstract apagarEncerradosAntes(limite: Date): Promise<number>;
 }
 
 export abstract class RepositorioDeDesafios {
@@ -268,8 +349,42 @@ export abstract class RepositorioDeDesafios {
    * unidade de trabalho, antes de travar o freio de segundo fator.
    */
   abstract buscarPorIdParaAtualizar(id: string): Promise<DesafioDeSegundoFator | null>;
+  /**
+   * O desafio, sem trava (S104): só para achar a conta e travar o freio por
+   * e-mail dela antes de `buscarPorIdParaAtualizar`. Quem chama confere depois,
+   * com o desafio travado, que a conta é a mesma.
+   */
+  abstract buscarPorId(id: string): Promise<DesafioDeSegundoFator | null>;
   /** Marca como usados os desafios da conta e etapa que ainda valem (antes de emitir um novo). */
   abstract invalidarVigentes(contaId: string, etapa: EtapaDoDesafio, agora: Date): Promise<void>;
+  /**
+   * Apaga os desafios da conta, das duas etapas, usados ou não (Q29): a
+   * redefinição de senha recomeça assim a contagem do teto diário
+   * (`somarTentativasDesde`). Os códigos por e-mail da conta ficam.
+   *
+   *     DELETE FROM identidade.codigos_verificacao
+   *      WHERE conta_id = $1 AND finalidade IN ('desafio_configurar', 'desafio_verificar')
+   *
+   * Como todo DELETE, espera quem segura um desafio da conta com trava.
+   */
+  abstract apagarDaConta(contaId: string): Promise<void>;
+  /**
+   * Soma das `tentativas` (os erros) dos desafios da conta, das duas etapas,
+   * emitidos depois de `desde` (`criado_em > desde`), usados ou não (S103):
+   *
+   *     SELECT coalesce(sum(tentativas), 0) FROM identidade.codigos_verificacao
+   *      WHERE conta_id = $1 AND criado_em > $2
+   *        AND finalidade IN ('desafio_configurar', 'desafio_verificar')
+   *
+   * Os casos de uso do 2FA chamam com o freio de segundo fator da conta
+   * travado e depois de gravar a tentativa errada (`atualizar`), então duas
+   * falhas simultâneas não somam o mesmo total. A retenção
+   * (`RepositorioDeCodigosDeVerificacao.apagarEncerradosAntes`, 1 dia depois
+   * do uso ou do vencimento) nunca apaga um desafio emitido nas últimas 24 h,
+   * então a soma não perde nenhum. Só a redefinição de senha zera a soma, com
+   * `apagarDaConta` (Q29).
+   */
+  abstract somarTentativasDesde(contaId: string, desde: Date): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +422,21 @@ export abstract class RepositorioDeBloqueios {
    * atualiza). Apaga a linha se o freio está zerado.
    */
   abstract salvar(bloqueio: BloqueioDeLogin): Promise<void>;
+  /**
+   * Retenção (S81, P12): apaga os freios parados desde antes de `limite` (a
+   * tarefa passa `agora` menos 30 min):
+   *
+   *     DELETE FROM identidade.bloqueios_login
+   *      WHERE greatest(bloqueado_ate, janela_inicio) < $1
+   *
+   * Com 30 min, a janela de 15 min (`JANELA_DE_FALHAS_EM_MS`) e a calma de 15
+   * min depois da espera (`CALMA_PARA_ZERAR_O_NIVEL_EM_MS`) já passaram: a
+   * próxima falha abriria janela nova com o nível zerado, então apagar equivale
+   * a zerar. O `greatest` (que ignora o `bloqueado_ate` nulo) não apaga uma
+   * janela nova aberta depois de uma espera antiga, como o `coalesce` do S81
+   * apagaria. Devolve quantas linhas apagou.
+   */
+  abstract apagarParadosAntes(limite: Date): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -422,12 +552,24 @@ export abstract class RepositorioDeSolicitacoes {
    * unidade acabou de inserir.
    */
   abstract contarDesde(contaId: string, tipo: TipoDeSolicitacao, desde: Date): Promise<number>;
-  /** Até `quantidade`, das mais antigas para as mais novas. */
+  /**
+   * Até `quantidade`, das mais antigas para as mais novas (`solicitada_em`, e
+   * o `id` no empate). Com `depoisDe`, só as que vêm depois dela nessa ordem
+   * (paginação por cursor, S105: uma solicitação que falha e continua no
+   * status não prende a tarefa no mesmo lote).
+   */
   abstract listarPorStatus(
     tipo: TipoDeSolicitacao,
     status: StatusDaSolicitacao,
     quantidade: number,
+    depoisDe?: CursorDeSolicitacao | null,
   ): Promise<readonly SolicitacaoDoTitular[]>;
+}
+
+/** Onde a página anterior de `listarPorStatus` parou: a última solicitação lida. */
+export interface CursorDeSolicitacao {
+  readonly solicitadaEm: Date;
+  readonly id: string;
 }
 
 export interface ExportacaoDoTitular {

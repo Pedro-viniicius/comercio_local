@@ -1,9 +1,9 @@
 // Redefinição de senha (CA-05, CA-06; P1-dono, S6, S8, S14, S94, S95; plano 01b,
 // etapa 9): código de uso único e 30 min; troca a senha, verifica o e-mail,
 // invalida os desafios do 2FA vivos e revoga todas as sessões; código errado e
-// e-mail sem conta respondem igual e somam no freio por e-mail do login; a
-// conta é lida só depois do freio travado, então não ressuscita uma conta
-// desativada no meio.
+// e-mail sem conta respondem igual e somam no freio por e-mail do login e, desde
+// o S93, no freio por origem (IP); a conta é lida só depois do freio travado,
+// então não ressuscita uma conta desativada no meio.
 import type { RedefinirSenha } from '@bairrin/contratos';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { RelogioFixo } from '../../../../compartilhado/tempo/relogio.ts';
@@ -34,7 +34,9 @@ import {
   type PendenciaDeExclusao,
   VerificadorDePendencias,
 } from '../portas/verificador-de-pendencias.ts';
+import { LIMIAR_DE_FALHAS } from '../../dominio/bloqueio-de-login.ts';
 import { chaveDoFreioPorEmail } from '../comum/chaves.ts';
+import { chaveDoFreioPorOrigem } from './comum.ts';
 import { SolicitarExclusaoCasoDeUso } from '../privacidade/solicitar-exclusao.ts';
 import { VerificarSegundoFatorCasoDeUso } from '../segundo-fator/verificar-segundo-fator.caso-de-uso.ts';
 import { EntrarCasoDeUso } from './entrar.caso-de-uso.ts';
@@ -55,6 +57,7 @@ const SENHA_NOVA = 'senha-nova-da-eva';
 const CODIGO = '482913';
 const CODIGO_DA_OUTRA = '730215';
 const CODIGO_INVALIDO = { tipo: 'codigo_invalido' };
+const IP = '198.51.100.7';
 
 const cifrador = new CifradorFalso();
 
@@ -187,7 +190,25 @@ async function abrirSessoes({ identidade }: Cenario): Promise<void> {
 }
 
 function entrada(parcial: Partial<EntradaDeRedefinirSenha> = {}): EntradaDeRedefinirSenha {
-  return { email: EMAIL, codigo: CODIGO, novaSenha: SENHA_NOVA, ...parcial };
+  return { email: EMAIL, codigo: CODIGO, novaSenha: SENHA_NOVA, ip: IP, ...parcial };
+}
+
+function freioDaOrigem({ identidade }: Cenario, ip: string | null = IP) {
+  const chave = chaveDoFreioPorOrigem(cifrador, ip);
+  return identidade.bloqueios.todos().find((b) => b.tipo === 'ip' && b.chaveHmac === chave);
+}
+
+/** Grava `falhas` falhas no freio de origem do `ip`, como fariam outras tentativas. */
+async function falhasNaOrigem({ identidade }: Cenario, falhas: number, ip = IP): Promise<void> {
+  await identidade.unidade.executar(async () => {
+    const freio = await identidade.bloqueios.buscarParaAtualizar(
+      chaveDoFreioPorOrigem(cifrador, ip),
+      'ip',
+      AGORA,
+    );
+    for (let falha = 0; falha < falhas; falha += 1) freio.registrarFalha(AGORA);
+    await identidade.bloqueios.salvar(freio);
+  });
 }
 
 function freioDoEmail({ identidade }: Cenario, email = EMAIL) {
@@ -197,7 +218,8 @@ function freioDoEmail({ identidade }: Cenario, email = EMAIL) {
 
 describe('RedefinirSenhaCasoDeUso', () => {
   it('o corpo do contrato entra no caso de uso', () => {
-    expectTypeOf<RedefinirSenha>().toExtend<EntradaDeRedefinirSenha>();
+    // O `ip` vem do proxy, não do corpo (etapa 16).
+    expectTypeOf<RedefinirSenha>().toExtend<Omit<EntradaDeRedefinirSenha, 'ip'>>();
   });
 
   it('código certo: troca a senha, verifica o e-mail, revoga todas as sessões e publica `SenhaRedefinida` (CA-05, P1-dono)', async () => {
@@ -410,7 +432,78 @@ describe('RedefinirSenhaCasoDeUso', () => {
     });
   });
 
-  it('os desafios do 2FA emitidos antes da redefinição deixam de valer: desafio_invalido (S94)', async () => {
+  describe('freio por origem (S93)', () => {
+    it('o código errado soma também no freio de IP, com a chave do login', async () => {
+      const cenario = montar();
+      await inserirConta(cenario);
+      await emitirCodigo(cenario);
+
+      await cenario.caso.executar(entrada({ codigo: '000000' }));
+
+      expect(freioDaOrigem(cenario)).toMatchObject({ falhas: 1 });
+      expect(freioDoEmail(cenario)).toMatchObject({ falhas: 1 });
+    });
+
+    it('e-mail sem conta também soma no freio de IP (quem varre e-mails é freado pela origem)', async () => {
+      const cenario = montar();
+
+      await expect(cenario.caso.executar(entrada({ email: OUTRO_EMAIL }))).resolves.toEqual(
+        CODIGO_INVALIDO,
+      );
+
+      expect(freioDaOrigem(cenario)).toMatchObject({ falhas: 1 });
+    });
+
+    it('com o freio de IP ativo: freado, sem conferir o código (o certo não redefine)', async () => {
+      const cenario = montar();
+      await inserirConta(cenario);
+      const codigoId = await emitirCodigo(cenario);
+      await falhasNaOrigem(cenario, LIMIAR_DE_FALHAS.ip);
+
+      await expect(cenario.caso.executar(entrada())).resolves.toEqual({
+        tipo: 'freado',
+        segundosDeEspera: 60,
+      });
+      const registro = cenario.identidade.codigos.todos().find((c) => c.id === codigoId);
+      expect(registro).toMatchObject({ tentativas: 0, usadoEm: null });
+      expect(cenario.identidade.contas.dadosDe(CONTA)?.senhaHash).toBe(
+        HasherFalso.hashDe(SENHA_ANTIGA),
+      );
+    });
+
+    it('o freio de IP vale para outro e-mail da mesma origem', async () => {
+      const cenario = montar();
+      await inserirConta(cenario);
+      await falhasNaOrigem(cenario, LIMIAR_DE_FALHAS.ip - 1);
+
+      await cenario.caso.executar(entrada({ email: OUTRO_EMAIL, codigo: '000000' }));
+
+      await expect(cenario.caso.executar(entrada())).resolves.toMatchObject({ tipo: 'freado' });
+    });
+
+    it('o código certo não zera o freio de IP, e outra origem não é afetada', async () => {
+      const cenario = montar();
+      await inserirConta(cenario);
+      await emitirCodigo(cenario);
+      await falhasNaOrigem(cenario, 3);
+
+      await expect(cenario.caso.executar(entrada())).resolves.toEqual({ tipo: 'redefinida' });
+
+      expect(freioDaOrigem(cenario)).toMatchObject({ falhas: 3 });
+      expect(freioDaOrigem(cenario, '203.0.113.9')).toBeUndefined();
+    });
+
+    it('sem IP, soma no freio da origem desconhecida (falha fechada)', async () => {
+      const cenario = montar();
+
+      await cenario.caso.executar(entrada({ ip: null }));
+
+      expect(freioDaOrigem(cenario, null)).toMatchObject({ falhas: 1 });
+      expect(freioDaOrigem(cenario)).toBeUndefined();
+    });
+  });
+
+  it('os desafios do 2FA emitidos antes da redefinição são apagados e deixam de valer: desafio_invalido (S94, Q29)', async () => {
     const cenario = montar();
     const { identidade } = cenario;
     await inserirConta(cenario);
@@ -430,10 +523,23 @@ describe('RedefinirSenhaCasoDeUso', () => {
     };
     const configurar = await emitir('configurar', '0000cccc-0000-4000-8000-000000000001', 's1');
     const verificar = await emitir('verificar', '0000cccc-0000-4000-8000-000000000002', 's2');
+    const daOutraConta = DesafioDeSegundoFator.emitir({
+      id: '0000cccc-0000-4000-8000-000000000003',
+      contaId: OUTRA_CONTA,
+      etapa: 'verificar',
+      tokenHmac: cifrador.hmac('desafio_verificar', [OUTRA_CONTA, 's3']),
+      agora: AGORA,
+    });
+    await identidade.desafios.inserir(daOutraConta);
 
     await expect(cenario.caso.executar(entrada())).resolves.toEqual({ tipo: 'redefinida' });
 
-    for (const desafio of identidade.desafios.todos()) expect(desafio.usadoEm).toEqual(AGORA);
+    // Apagados, não só usados: a soma do teto diário do 2FA recomeça (Q29). Os da outra conta
+    // e o código de recuperação (já usado) ficam.
+    expect(identidade.desafios.todos().map((d) => d.id)).toEqual([daOutraConta.id]);
+    expect(identidade.codigos.todos()).toEqual([
+      expect.objectContaining({ contaId: CONTA, usadoEm: AGORA }),
+    ]);
     const verificarSegundoFator = new VerificarSegundoFatorCasoDeUso(
       identidade.unidade,
       cenario.relogio,
@@ -446,6 +552,8 @@ describe('RedefinirSenhaCasoDeUso', () => {
       new GeradorDeSegredosFalso(),
       totp,
       new EmissorDeJwtFalso(),
+      identidade.publicador,
+      identidade.auditoria,
     );
     for (const desafio of [configurar, verificar]) {
       await expect(

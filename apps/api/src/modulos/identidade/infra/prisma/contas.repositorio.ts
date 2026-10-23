@@ -16,17 +16,25 @@
 // - `buscarPorIdParaAtualizar` trava a linha com `FOR NO KEY UPDATE` (o nível
 //   do UPDATE de colunas comuns), que não espera quem só insere filha pela FK.
 // - `listarParaExpurgo` repete em SQL a regra de `Conta.deveSerExpurgada`, e a
-//   trigger `contas_so_expurgo` (S78) recusa em `apagar` o que fugir dela.
+//   trigger `contas_so_expurgo` (S78) recusa em `apagar` o que fugir dela: o
+//   23514 dela vira `ContaForaDoExpurgo`, reconhecido só pelo código do
+//   Postgres, nunca pela mensagem.
+// - `travarCriacaoDeAdmin` é uma trava consultiva fixa (`pg_advisory_xact_lock`),
+//   não de linha: sem admin, não há linha a travar para serializar a CLI.
 import { Injectable } from '@nestjs/common';
-import type {
-  Conta as ContaPrisma,
-  PerfilDaConta as PerfilDaContaPrisma,
+import {
+  type Conta as ContaPrisma,
+  type PerfilDaConta as PerfilDaContaPrisma,
+  Prisma,
 } from '../../../../compartilhado/infra/gerado/prisma/client.ts';
 import { UnidadeDeTrabalhoPrisma } from '../../../../compartilhado/infra/unidade-de-trabalho-prisma.ts';
-import { Conta, EmailJaCadastrado } from '../../dominio/conta.ts';
+import { Conta, ContaForaDoExpurgo, EmailJaCadastrado } from '../../dominio/conta.ts';
 import type { Email } from '../../dominio/email.ts';
 import { RepositorioDeContas } from '../../dominio/repositorios.ts';
 import { ehErroDoPrisma, ehUuid, exigirTransacao } from './comum.ts';
+
+/** O menor UUID: o cursor de `listarParaExpurgo` antes da primeira página. */
+const UUID_NULO = '00000000-0000-0000-0000-000000000000';
 
 /** Perfis na ordem de concessão, como a conta os guarda. */
 const PERFIS_EM_ORDEM = {
@@ -151,8 +159,30 @@ export class RepositorioDeContasPrisma extends RepositorioDeContas {
     return alteradas === 1;
   }
 
-  override async listarParaExpurgo(limite: Date, quantidade: number): Promise<string[]> {
+  override async existeAdminAtivo(): Promise<boolean> {
+    const admin = await this.unidade.cliente().perfilDaConta.findFirst({
+      where: { perfil: 'admin', conta: { status: 'ativa' } },
+      select: { contaId: true },
+    });
+    return admin !== null;
+  }
+
+  override async travarCriacaoDeAdmin(): Promise<void> {
+    const transacao = exigirTransacao(this.unidade, 'travarCriacaoDeAdmin');
+    // `$executeRaw`: a função devolve `void`, que o `$queryRaw` não sabe ler.
+    await transacao.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended('identidade.criar_admin', 0))`;
+  }
+
+  override async listarParaExpurgo(
+    limite: Date,
+    quantidade: number,
+    depoisDe: string | null = null,
+  ): Promise<string[]> {
     if (!Number.isInteger(quantidade) || quantidade <= 0) return [];
+    if (depoisDe !== null && !ehUuid(depoisDe)) return [];
+    // Sem cursor, o menor UUID possível: todas as contas vêm depois dele.
+    const cursor = depoisDe ?? UUID_NULO;
     const linhas = await this.unidade.cliente().$queryRaw<{ id: string }[]>`
       SELECT c.id::text AS id
         FROM identidade.contas c
@@ -161,15 +191,33 @@ export class RepositorioDeContasPrisma extends RepositorioDeContas {
          AND NOT EXISTS (SELECT 1 FROM identidade.perfis_conta p
                           WHERE p.conta_id = c.id AND p.perfil IN ('admin', 'lojista'))
          AND coalesce(c.ultimo_login_em, c.criada_em) < ${limite}
-       ORDER BY coalesce(c.ultimo_login_em, c.criada_em), c.id
+         AND c.id > ${cursor}::uuid
+       ORDER BY c.id
        LIMIT ${quantidade}::integer`;
     return linhas.map((linha) => linha.id);
   }
 
   override async apagar(id: string): Promise<void> {
     if (!ehUuid(id)) return;
-    await this.unidade.cliente().conta.deleteMany({ where: { id } });
+    try {
+      await this.unidade.cliente().conta.deleteMany({ where: { id } });
+    } catch (erro) {
+      if (ehRecusaDoExpurgo(erro)) throw new ContaForaDoExpurgo();
+      throw erro;
+    }
   }
+}
+
+/**
+ * O DELETE foi recusado pela trigger `contas_so_expurgo` (S78): `check_violation`
+ * (23514) do Postgres, que o adapter do Prisma entrega em
+ * `meta.driverAdapterError.cause.originalCode`.
+ */
+function ehRecusaDoExpurgo(erro: unknown): boolean {
+  if (!(erro instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  const adaptador = erro.meta?.['driverAdapterError'] as
+    { cause?: { originalCode?: unknown } } | undefined;
+  return adaptador?.cause?.originalCode === '23514';
 }
 
 function paraConta(linha: ContaPrisma & { perfis: PerfilDaContaPrisma[] }): Conta {

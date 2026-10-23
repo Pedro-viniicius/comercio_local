@@ -8,6 +8,7 @@ import {
   type DadosDaConta,
   decidirCadastro,
   DIAS_ATE_EXPURGO_DE_NAO_VERIFICADA,
+  DIAS_PARA_ALERTA_DE_ANONIMIZACAO,
   EstadoDeContaInvalido,
   HashDeSenhaInvalido,
   limiteDoExpurgo,
@@ -156,6 +157,55 @@ describe('login e verificação (P1-dono)', () => {
   });
 });
 
+describe('Conta.criarAdmin (CLI seed:admin; CA-07)', () => {
+  function novoAdmin(nome = '  Bia Admin ') {
+    return Conta.criarAdmin({
+      id: ID,
+      nome,
+      email: Email.criar('Bia@Bairrin.com.br'),
+      telefone: Telefone.criar('(35) 98888-1234'),
+      agora: AGORA,
+    });
+  }
+
+  it('nasce ativa, sem senha, com telefone e os perfis consumidor e admin', () => {
+    const conta = novoAdmin();
+    expect(conta.dados).toEqual({
+      id: ID,
+      nome: 'Bia Admin',
+      emailNormalizado: 'bia@bairrin.com.br',
+      telefoneE164: '+5535988881234',
+      senhaHash: null,
+      emailVerificadoEm: null,
+      ultimoLoginEm: null,
+      status: 'ativa',
+      criadaEm: AGORA,
+      desativadaEm: null,
+      anonimizadaEm: null,
+      perfis: [
+        { perfil: 'consumidor', concedidoEm: AGORA, concedidoPor: null },
+        { perfil: 'admin', concedidoEm: AGORA, concedidoPor: null },
+      ],
+    } satisfies DadosDaConta);
+  });
+
+  it('não pode entrar antes da redefinição; depois dela entra e fica verificada', () => {
+    const conta = novoAdmin();
+    expect(conta.podeEntrar).toBe(false);
+    conta.redefinirSenha('hash-da-primeira-senha', depois(1000));
+    expect(conta.podeEntrar).toBe(true);
+    expect(conta.emailVerificadoEm).toEqual(depois(1000));
+  });
+
+  it('nunca é expurgada, mesmo sem verificação e sem login', () => {
+    expect(novoAdmin().deveSerExpurgada(depois(365 * UM_DIA))).toBe(false);
+  });
+
+  it('recusa nome inválido, como o cadastro', () => {
+    expect(() => novoAdmin('   ')).toThrow(NomeInvalido);
+  });
+});
+
 describe('perfis (CA-07)', () => {
   it('concede lojista à mesma conta, sem duplicar', () => {
     const conta = novaConta();
@@ -225,6 +275,24 @@ describe('exclusão e anonimização (CA-11)', () => {
     expect(conta.desativadaEm).toEqual(depois(1000));
     expect(conta.prazoDeAnonimizacao).toEqual(depois(1000 + 30 * UM_DIA));
     expect(() => conta.desativar(depois(2000))).toThrow(OperacaoInvalidaNaConta);
+  });
+
+  it('alerta só depois de 25 dias da desativação (prazo de 30 menos 5)', () => {
+    const conta = novaConta();
+    conta.desativar(AGORA);
+    const inicio = depois(DIAS_PARA_ALERTA_DE_ANONIMIZACAO * UM_DIA);
+    expect(conta.inicioDoAlertaDeAnonimizacao).toEqual(inicio);
+    expect(conta.deveAlertarAnonimizacao(inicio)).toBe(false);
+    expect(conta.deveAlertarAnonimizacao(new Date(inicio.getTime() + 1))).toBe(true);
+  });
+
+  it('conta ativa ou anonimizada não alerta', () => {
+    const conta = novaConta();
+    expect(conta.inicioDoAlertaDeAnonimizacao).toBeNull();
+    expect(conta.deveAlertarAnonimizacao(depois(365 * UM_DIA))).toBe(false);
+    conta.desativar(AGORA);
+    conta.anonimizar(depois(UM_DIA));
+    expect(conta.deveAlertarAnonimizacao(depois(365 * UM_DIA))).toBe(false);
   });
 
   it('conta ativa não tem prazo de anonimização e não pode ser anonimizada', () => {

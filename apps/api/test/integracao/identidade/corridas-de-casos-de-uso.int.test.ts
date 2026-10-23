@@ -9,6 +9,7 @@
 // legítima, nenhuma tentativa de código perdida ou contada em dobro.
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { chaveDoFreioPorOrigem } from '../../../src/modulos/identidade/aplicacao/sessao/comum.ts';
 import { DesafioDeSegundoFator } from '../../../src/modulos/identidade/dominio/desafio-de-segundo-fator.ts';
 import { Email } from '../../../src/modulos/identidade/dominio/email.ts';
 import {
@@ -63,7 +64,10 @@ let proximoIp = 10;
 /** IP de documentação único por chamada: o freio por origem não passa de um caso para o outro. */
 function ipNovo(): string {
   proximoIp += 1;
-  return `198.51.100.${proximoIp % 250}`;
+  const ip = `198.51.100.${proximoIp % 250}`;
+  // R5: o freio de origem deste IP sai na limpeza, para não sobrar de uma execução para outra.
+  freiosDoTeste.push(chaveDoFreioPorOrigem(a.servicos.cifrador, ip));
+  return ip;
 }
 
 async function novaConta(opcoes: { senha?: string } = {}): Promise<ContaDeTeste> {
@@ -215,6 +219,7 @@ describe('freio do login (CA-04, S14, R1)', () => {
     }
     for (let i = 0; i < 2; i++) {
       const r = await a.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '000000',
         novaSenha: OUTRA_SENHA,
@@ -231,6 +236,7 @@ describe('freio do login (CA-04, S14, R1)', () => {
     expect(await entrarNoApp(a, conta)).toEqual({ tipo: 'freado', segundosDeEspera: 60 });
     expect(
       await a.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '123456',
         novaSenha: OUTRA_SENHA,
@@ -296,6 +302,7 @@ describe('redefinição × exclusão (S8, S14)', () => {
     // A redefinição grava só a senha e a verificação (S95), não a conta inteira.
     const pausa = pausarAntes(a.repos.contas, 'gravarSenhaRedefinida');
     const redefinicao = a.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: conta.email,
       codigo: '654321',
       novaSenha: OUTRA_SENHA,
@@ -318,6 +325,7 @@ describe('redefinição × exclusão (S8, S14)', () => {
     const exclusao = a.casos.solicitarExclusao.executar({ contaId: conta.id, senha: conta.senha });
     await pausa.chegou;
     const redefinicao = b.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: conta.email,
       codigo: '654321',
       novaSenha: OUTRA_SENHA,
@@ -403,6 +411,7 @@ describe('renovação × outras requisições (R1, R7, S16, S77, S8)', () => {
     await pausa.chegou;
     expect(
       await b.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '222333',
         novaSenha: OUTRA_SENHA,
@@ -704,6 +713,7 @@ describe('CLI de reconfiguração do 2FA × login (S97, A-R13)', () => {
     await inserirCodigo(a, admin.conta.id, 'recuperacao_senha', '246810');
     const pausa = pausarAntes(a.repos.contas, 'gravarSenhaRedefinida');
     const redefinicao = a.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: admin.conta.email,
       codigo: '246810',
       novaSenha: OUTRA_SENHA,

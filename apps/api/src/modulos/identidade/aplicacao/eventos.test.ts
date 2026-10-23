@@ -25,6 +25,7 @@ const EXEMPLOS: { [Nome in NomeDoEventoDeIdentidade]: PayloadDoEventoDeIdentidad
   ExportacaoSolicitada: { contaId: CONTA, solicitacaoId: SOLICITACAO },
   ContaDesativada: { contaId: CONTA },
   ContaAnonimizada: { contaId: CONTA },
+  SegundoFatorFreado: { contaId: CONTA },
 };
 
 const NOMES = Object.keys(EVENTOS_DE_IDENTIDADE) as NomeDoEventoDeIdentidade[];

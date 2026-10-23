@@ -81,6 +81,13 @@ export class RepositorioDeBloqueiosPrisma extends RepositorioDeBloqueios {
       select: { chaveHmac: true },
     });
   }
+
+  override apagarParadosAntes(limite: Date): Promise<number> {
+    // `greatest` ignora o `bloqueado_ate` nulo (S81, revisão do grupo B).
+    return this.unidade.cliente().$executeRaw`
+      DELETE FROM identidade.bloqueios_login
+       WHERE greatest(bloqueado_ate, janela_inicio) < ${limite}`;
+  }
 }
 
 /** Linha devolvida pelo `RETURNING` de `buscarParaAtualizar`, com os nomes das colunas. */

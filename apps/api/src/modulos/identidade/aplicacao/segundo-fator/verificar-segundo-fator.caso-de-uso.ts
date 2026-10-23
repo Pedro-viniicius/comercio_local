@@ -11,13 +11,22 @@
 //     `campo` que veio, para o 400 `campos[codigo|codigoRecuperacao].invalido`)
 //     se ainda sobra tentativa, `desafio_invalido` na quinta.
 // O freio só zera com o segundo fator concluído (S1); a senha certa não zera.
+// Quando a falha põe o freio em espera, sai `SegundoFatorFreado` (aviso ao dono
+// por e-mail, S92). Se ele foi acionado de novo já no nível máximo (15 min,
+// P16), ou se os erros de segundo fator da conta nas últimas 24 h passaram de
+// 20 (S103), a senha da conta é apagada, as sessões dela são revogadas e a
+// auditoria registra (S104), e o aviso manda recuperar a senha
+// (`reagirAoFreioDeSegundoFator`). Por isso toda tentativa trava antes de tudo
+// o freio por e-mail da conta do desafio (`travarFreioPorEmailDoDesafio`).
 //
-// Travas (R8): desafio → freio de segundo fator → `segundo_fator` e códigos de
-// recuperação. Dois desafios da mesma conta com o mesmo TOTP (ou o mesmo
+// Travas (R8, S104): freio por e-mail da conta → desafio → freio de segundo
+// fator → `segundo_fator` e códigos de recuperação. Dois desafios da mesma conta com o mesmo TOTP (ou o mesmo
 // código de recuperação) ao mesmo tempo: o segundo espera o freio, lê o passo
 // (ou o código) já gasto pelo primeiro e recebe `codigo_errado`.
 import { normalizarCodigoDeRecuperacao } from '@bairrin/contratos/validadores';
 import { Injectable } from '@nestjs/common';
+import { RepositorioDeAuditoria } from '../../../../compartilhado/auditoria/repositorio-de-auditoria.ts';
+import { PublicadorDeEventos } from '../../../../compartilhado/eventos/publicador.ts';
 import { Relogio } from '../../../../compartilhado/tempo/relogio.ts';
 import { UnidadeDeTrabalho } from '../../../../compartilhado/transacao/unidade-de-trabalho.ts';
 import type { Conta } from '../../dominio/conta.ts';
@@ -37,11 +46,14 @@ import { GeradorDeSegredos } from '../portas/gerador-de-segredos.ts';
 import { VerificadorTotp } from '../portas/verificador-totp.ts';
 import {
   abrirSessaoComSegundoFator,
+  avaliarFalhaDeSegundoFator,
   chaveDoFreioDeSegundoFator,
   DESAFIO_INVALIDO,
   lerDesafio,
   podeConcluirSegundoFator,
+  reagirAoFreioDeSegundoFator,
   segredoTotp,
+  travarFreioPorEmailDoDesafio,
 } from './comum.ts';
 
 /** Campo do corpo que trouxe o código (o 400 aponta para ele). */
@@ -99,6 +111,8 @@ export class VerificarSegundoFatorCasoDeUso {
     private readonly gerador: GeradorDeSegredos,
     private readonly totp: VerificadorTotp,
     private readonly emissor: EmissorDeJwt,
+    private readonly publicador: PublicadorDeEventos,
+    private readonly auditoria: RepositorioDeAuditoria,
   ) {}
 
   async executar(
@@ -119,11 +133,26 @@ export class VerificarSegundoFatorCasoDeUso {
   ): Promise<ResultadoDeVerificarSegundoFator> {
     const agora = this.relogio.agora();
     return this.unidade.executar(async () => {
+      const contaDoDesafio = await travarFreioPorEmailDoDesafio(
+        {
+          desafios: this.desafios,
+          contas: this.contas,
+          bloqueios: this.bloqueios,
+          cifrador: this.cifrador,
+        },
+        entrada.desafio,
+        agora,
+      );
+      if (contaDoDesafio === null) return DESAFIO_INVALIDO;
       const desafio = await lerDesafio(
         { desafios: this.desafios, cifrador: this.cifrador },
         entrada.desafio,
       );
-      if (desafio === null || !desafio.estaValidoPara('verificar', agora)) {
+      if (
+        desafio === null ||
+        desafio.contaId !== contaDoDesafio ||
+        !desafio.estaValidoPara('verificar', agora)
+      ) {
         return DESAFIO_INVALIDO;
       }
       const conta = await this.contas.buscarPorId(desafio.contaId);
@@ -147,6 +176,7 @@ export class VerificarSegundoFatorCasoDeUso {
         campo === 'codigo'
           ? this.#conferirTotp(conta, atual, entrada.codigo ?? '', agora)
           : await this.#conferirRecuperacao(conta, entrada.codigoRecuperacao ?? '');
+      const nivelAntes = freio.nivel;
       const resultado = desafio.avaliarCodigo({
         etapa: 'verificar',
         freio,
@@ -155,6 +185,19 @@ export class VerificarSegundoFatorCasoDeUso {
       });
       await this.desafios.atualizar(desafio);
       await this.bloqueios.salvar(freio);
+      const consequencia = await avaliarFalhaDeSegundoFator(
+        { desafios: this.desafios },
+        { contaId: conta.id, codigoConfere: conferencia !== null, nivelAntes, freio, agora },
+      );
+      await reagirAoFreioDeSegundoFator(
+        {
+          contas: this.contas,
+          sessoes: this.sessoes,
+          auditoria: this.auditoria,
+          publicador: this.publicador,
+        },
+        { contaId: conta.id, consequencia, agora },
+      );
       if (resultado.tipo === 'codigo_errado') return { tipo: 'codigo_errado', campo };
       if (resultado.tipo !== 'concluido') return resultado;
       if (conferencia === null) throw new Error('Segundo fator concluído sem código conferido.');

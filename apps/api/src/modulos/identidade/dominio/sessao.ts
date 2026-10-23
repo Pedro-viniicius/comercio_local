@@ -55,7 +55,12 @@ export type MotivoDeRevogacao =
   /** Trocada por uma sessão nova da mesma família (ex.: verificação de e-mail). */
   | 'substituida'
   /** Segundo fator reconfigurado pela CLI. */
-  | 'segundo_fator_reconfigurado';
+  | 'segundo_fator_reconfigurado'
+  /**
+   * Senha apagada pelo freio de segundo fator (P16: acionado de novo no nível
+   * máximo, ou o teto diário de erros, S103): todas as sessões da conta (S104).
+   */
+  | 'segundo_fator_freado';
 
 /** Forma persistida da sessão, coluna a coluna. */
 export interface DadosDaSessao {

@@ -14,8 +14,9 @@ export type SolicitarRecuperacao = z.infer<typeof solicitarRecuperacaoSchema>;
  * cadastro (S22). Respostas: 204, e a redefinição verifica o e-mail e revoga
  * todas as sessões da conta (CA-05, P1-dono); 400 `campos[codigo].invalido`
  * quando o código não confere (errado, vencido ou já usado), além dos 400 de
- * campo da senha nova; 429 com `Retry-After` no freio por e-mail, em que o
- * código também entra (S14).
+ * campo da senha nova; 429 com `Retry-After` quando o freio por e-mail (S14)
+ * ou o freio por origem (IP, o mesmo do login; S93) está ativo. O código
+ * errado soma uma falha nos dois.
  */
 export const redefinirSenhaSchema = objetoEstrito({
   email: emailSchema,

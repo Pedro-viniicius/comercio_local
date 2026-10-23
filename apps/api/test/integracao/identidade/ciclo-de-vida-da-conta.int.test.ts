@@ -11,6 +11,7 @@ import {
 } from '../../../src/compartilhado/titular/anonimizador-de-titular.ts';
 import { AnonimizadorDeIdentidade } from '../../../src/modulos/identidade/aplicacao/privacidade/anonimizador-identidade.ts';
 import { AnonimizarContaCasoDeUso } from '../../../src/modulos/identidade/aplicacao/privacidade/anonimizar-conta.ts';
+import { chaveDoFreioPorOrigem } from '../../../src/modulos/identidade/aplicacao/sessao/comum.ts';
 import { Email } from '../../../src/modulos/identidade/dominio/email.ts';
 import {
   apagarContasDoTeste,
@@ -67,7 +68,10 @@ beforeEach(() => {
 let proximoIp = 100;
 function ipNovo(): string {
   proximoIp += 1;
-  return `203.0.113.${proximoIp % 250}`;
+  const ip = `203.0.113.${proximoIp % 250}`;
+  // R5: o freio de origem deste IP sai na limpeza, para não sobrar de uma execução para outra.
+  freiosDoTeste.push(chaveDoFreioPorOrigem(p.servicos.cifrador, ip));
+  return ip;
 }
 
 async function novaConta(
@@ -518,13 +522,16 @@ describe('verificação de e-mail (CA-01)', () => {
         codigo: '000000',
       });
     }
-    expect(
-      await p.casos.verificarEmail.executar({
+    const certo = () =>
+      p.casos.verificarEmail.executar({
         contaId: outra.id,
         sid: sessaoDaOutra.sid,
         codigo: '246810',
-      }),
-    ).toEqual({ tipo: 'codigo_invalido' });
+      });
+    // A quinta falha também aciona o freio por e-mail da conta (S93, etapa 13): 1 min de espera.
+    expect(await certo()).toEqual({ tipo: 'freado', segundosDeEspera: 60 });
+    p.relogio.avancar(UM_MINUTO);
+    expect(await certo()).toEqual({ tipo: 'codigo_invalido' });
     expect((await linhaDaConta(outra.id)).email_verificado_em).toBeNull();
   });
 
@@ -599,6 +606,7 @@ describe('recuperação de senha (CA-05, CA-06)', () => {
 
     expect(
       await p.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '908070',
         novaSenha: OUTRA_SENHA,
@@ -627,6 +635,7 @@ describe('recuperação de senha (CA-05, CA-06)', () => {
     // Uso único: o mesmo código não redefine de novo.
     expect(
       await p.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '908070',
         novaSenha: SENHA,
@@ -639,16 +648,19 @@ describe('recuperação de senha (CA-05, CA-06)', () => {
     await inserirCodigo(p, conta.id, 'recuperacao_senha', '313131');
     p.relogio.avancar(30 * UM_MINUTO);
     const vencido = await p.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: conta.email,
       codigo: '313131',
       novaSenha: OUTRA_SENHA,
     });
     const errado = await p.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: conta.email,
       codigo: '000001',
       novaSenha: OUTRA_SENHA,
     });
     const semConta = await p.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: emailUnico(),
       codigo: '313131',
       novaSenha: OUTRA_SENHA,
@@ -663,6 +675,7 @@ describe('recuperação de senha (CA-05, CA-06)', () => {
     expect(
       (
         await p.casos.redefinirSenha.executar({
+          ip: ipNovo(),
           email: conta.email,
           codigo: '414141',
           novaSenha: OUTRA_SENHA,
@@ -676,6 +689,7 @@ describe('recuperação de senha (CA-05, CA-06)', () => {
     await inserirCodigo(p, conta.id, 'recuperacao_senha', '777000');
     for (let i = 0; i < 5; i++) {
       await p.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '000002',
         novaSenha: OUTRA_SENHA,
@@ -684,6 +698,7 @@ describe('recuperação de senha (CA-05, CA-06)', () => {
     p.relogio.avancar(15 * UM_MINUTO + 1_000);
     expect(
       await p.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: conta.email,
         codigo: '777000',
         novaSenha: OUTRA_SENHA,
@@ -695,6 +710,7 @@ describe('recuperação de senha (CA-05, CA-06)', () => {
     await inserirCodigo(p, outra.id, 'verificacao_email', '888999');
     expect(
       await p.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: outra.email,
         codigo: '888999',
         novaSenha: OUTRA_SENHA,
@@ -982,6 +998,7 @@ describe('2FA do admin (CA-09, S1)', () => {
     await inserirCodigo(p, admin.conta.id, 'recuperacao_senha', '246813');
     expect(
       await p.casos.redefinirSenha.executar({
+        ip: ipNovo(),
         email: admin.conta.email,
         codigo: '246813',
         novaSenha: OUTRA_SENHA,
@@ -1336,6 +1353,7 @@ describe('dado pessoal fora dos eventos, da auditoria e dos erros (CA-12)', () =
     await p.casos.solicitarRecuperacao.executar({ email: conta.email });
     await inserirCodigo(p, conta.id, 'recuperacao_senha', '903456');
     await p.casos.redefinirSenha.executar({
+      ip: ipNovo(),
       email: conta.email,
       codigo: '903456',
       novaSenha: OUTRA_SENHA,

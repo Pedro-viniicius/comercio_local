@@ -37,6 +37,7 @@ import {
 } from '../../../src/modulos/identidade/dominio/codigo-de-verificacao.ts';
 import {
   Conta,
+  ContaForaDoExpurgo,
   type DadosDaConta,
   EmailJaCadastrado,
   type TipoDeDocumentoLegal,
@@ -50,6 +51,7 @@ import {
   type CodigoDeRecuperacao,
   type Consentimento,
   type ConsentimentoComDocumento,
+  type CursorDeSolicitacao,
   type DocumentoLegal,
   type ExportacaoDoTitular,
   RepositorioDeBloqueios,
@@ -249,28 +251,51 @@ export class ContasEmMemoria extends RepositorioDeContas {
     }));
   }
 
-  override listarParaExpurgo(limite: Date, quantidade: number): Promise<string[]> {
+  /** Imita o `pg_advisory_xact_lock` fixo: uma trava só, até o fim da unidade. */
+  override async travarCriacaoDeAdmin(): Promise<void> {
+    this.#unidade.exigirTransacao('Trava da criação de admin');
+    await this.#unidade.travar('criacao_de_admin');
+  }
+
+  override existeAdminAtivo(): Promise<boolean> {
+    return comoPromessa(() =>
+      this.#tabela
+        .valores()
+        .some(
+          (conta) => conta.status === 'ativa' && conta.perfis.some((p) => p.perfil === 'admin'),
+        ),
+    );
+  }
+
+  /** Em ordem de id, depois de `depoisDe` (o UUID em minúsculas ordena como no banco). */
+  override listarParaExpurgo(
+    limite: Date,
+    quantidade: number,
+    depoisDe: string | null = null,
+  ): Promise<string[]> {
     return comoPromessa(() =>
       this.#tabela
         .valores()
         .filter((conta) => podeSerApagada(conta) && referenciaDoExpurgo(conta) < limite.getTime())
-        .sort((a, b) => referenciaDoExpurgo(a) - referenciaDoExpurgo(b))
-        .slice(0, quantidade)
+        .filter((conta) => depoisDe === null || conta.id > depoisDe)
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .slice(0, Math.max(0, quantidade))
         .map((conta) => conta.id),
     );
   }
 
   /**
    * Imita a trigger `contas_so_expurgo` (S78): recusa a conta verificada, não
-   * ativa ou com perfil `admin` ou `lojista`. A parte do tempo (sem login há 7
-   * dias) o banco confere com `now()`, e o fake não, porque os testes usam o
-   * `RelogioFixo`.
+   * ativa ou com perfil `admin` ou `lojista` com `ContaForaDoExpurgo`, como o
+   * adaptador. A parte do tempo (sem login há 7 dias) o banco confere com
+   * `now()`, e o fake não, porque os testes usam o `RelogioFixo`: para
+   * simular a recusa da fronteira, sobrescreva `apagar` numa subclasse.
    */
   override apagar(id: string): Promise<void> {
     return comoPromessa(() => {
       const dados = this.#tabela.ler(id);
       if (dados === undefined) return;
-      if (!podeSerApagada(dados)) throw erroDoFalso('só o expurgo apaga conta (S78)');
+      if (!podeSerApagada(dados)) throw new ContaForaDoExpurgo();
       this.#tabela.apagar(id);
       this.#aoApagar(id);
     });
@@ -452,13 +477,25 @@ export class SessoesEmMemoria extends RepositorioDeSessoes {
 
   /** Cascata síncrona, usada por `ContasEmMemoria.apagar`; leva o histórico das sessões. */
   removerDaConta(contaId: string): void {
+    this.#removerOnde((s) => s.contaId === contaId);
+  }
+
+  /** `coalesce(revogada_em, expira_em) < limite`, com o histórico das apagadas (FK em cascata). */
+  override apagarEncerradasAntes(limite: Date): Promise<number> {
+    return comoPromessa(() =>
+      this.#removerOnde((s) => (s.revogadaEm ?? s.expiraEm).getTime() < limite.getTime()),
+    );
+  }
+
+  #removerOnde(condicao: (sessao: DadosDaSessao) => boolean): number {
     const ids = new Set(
       this.todas()
-        .filter((s) => s.contaId === contaId)
+        .filter(condicao)
         .map((s) => s.id),
     );
     this.#tabela.apagarOnde((sessao) => ids.has(sessao.id));
     this.#usados.apagarOnde((usado) => ids.has(usado.sessaoId));
+    return ids.size;
   }
 
   /**
@@ -538,6 +575,14 @@ export class DesafiosEmMemoria extends RepositorioDeDesafios {
     return dados === undefined ? null : DesafioDeSegundoFator.reconstituir(dados);
   }
 
+  /** Sem trava: lê o valor já gravado. */
+  override buscarPorId(id: string): Promise<DesafioDeSegundoFator | null> {
+    return comoPromessa(() => {
+      const dados = this.#tabela.ler(id);
+      return dados === undefined ? null : DesafioDeSegundoFator.reconstituir(dados);
+    });
+  }
+
   override invalidarVigentes(contaId: string, etapa: EtapaDoDesafio, agora: Date): Promise<void> {
     return comoPromessa(() => {
       for (const dados of this.#tabela.valores()) {
@@ -548,9 +593,41 @@ export class DesafiosEmMemoria extends RepositorioDeDesafios {
     });
   }
 
+  /**
+   * Como o `DELETE` das finalidades de desafio: dentro de uma unidade, trava
+   * cada desafio da conta antes (espera quem o segura com
+   * `buscarPorIdParaAtualizar`) e apaga o que ainda existe depois da espera.
+   */
+  override async apagarDaConta(contaId: string): Promise<void> {
+    const ids = this.#tabela
+      .valores()
+      .filter((d) => d.contaId === contaId)
+      .map((d) => d.id);
+    if (this.#unidade.emTransacao) {
+      for (const id of ids) await this.#unidade.travar(chaveDeTravaDoCodigo(id));
+    }
+    for (const id of ids) this.#tabela.apagar(id);
+  }
+
+  override somarTentativasDesde(contaId: string, desde: Date): Promise<number> {
+    return comoPromessa(() =>
+      this.#tabela
+        .valores()
+        .filter((d) => d.contaId === contaId && d.criadoEm.getTime() > desde.getTime())
+        .reduce((soma, d) => soma + d.tentativas, 0),
+    );
+  }
+
   /** Cascata síncrona (mesma tabela dos códigos no banco). */
   removerDaConta(contaId: string): void {
     this.#tabela.apagarOnde((desafio) => desafio.contaId === contaId);
+  }
+
+  /** Retenção pelos códigos (mesma tabela): `coalesce(usado_em, expira_em) < limite`. */
+  removerEncerradosAntes(limite: Date): number {
+    return this.#tabela.apagarOnde(
+      (desafio) => (desafio.usadoEm ?? desafio.expiraEm).getTime() < limite.getTime(),
+    );
   }
 }
 
@@ -643,6 +720,40 @@ export class CodigosEmMemoria extends RepositorioDeCodigosDeVerificacao {
     this.#desafios?.removerDaConta(contaId);
   }
 
+  /** Imita o `pg_advisory_xact_lock`: uma trava por conta e finalidade, até o fim da unidade. */
+  override async travarEmissao(contaId: string, finalidade: FinalidadeDoCodigo): Promise<void> {
+    this.#unidade.exigirTransacao('Trava da emissão');
+    await this.#unidade.travar(`emissao_de_codigo:${contaId}:${finalidade}`);
+  }
+
+  override contarEmitidosDesde(
+    contaId: string,
+    finalidade: FinalidadeDoCodigo,
+    desde: Date,
+  ): Promise<number> {
+    return comoPromessa(
+      () =>
+        this.#tabela
+          .valores()
+          .filter(
+            (codigo) =>
+              codigo.contaId === contaId &&
+              codigo.finalidade === finalidade &&
+              codigo.criadoEm.getTime() > desde.getTime(),
+          ).length,
+    );
+  }
+
+  /** Com `desafios`, apaga também os desafios encerrados (mesma tabela no banco). */
+  override apagarEncerradosAntes(limite: Date): Promise<number> {
+    return comoPromessa(() => {
+      const codigos = this.#tabela.apagarOnde(
+        (codigo) => (codigo.usadoEm ?? codigo.expiraEm).getTime() < limite.getTime(),
+      );
+      return codigos + (this.#desafios?.removerEncerradosAntes(limite) ?? 0);
+    });
+  }
+
   /** Em ordem de emissão, `criado_em` (o mais recente por último). */
   #vigentes(contaId: string, finalidade: FinalidadeDoCodigo, agora: Date): CodigoDeVerificacao[] {
     return this.#tabela
@@ -701,6 +812,17 @@ export class BloqueiosEmMemoria extends RepositorioDeBloqueios {
       if (bloqueio.estaZerado) this.#tabela.apagar(chave);
       else this.#tabela.gravar(chave, bloqueio.dados);
     });
+  }
+
+  /** `greatest(bloqueado_ate, janela_inicio) < limite` (o `greatest` ignora o nulo). */
+  override apagarParadosAntes(limite: Date): Promise<number> {
+    return comoPromessa(() =>
+      this.#tabela.apagarOnde(
+        (freio) =>
+          Math.max(freio.bloqueadoAte?.getTime() ?? -Infinity, freio.janelaInicio.getTime()) <
+          limite.getTime(),
+      ),
+    );
   }
 }
 
@@ -916,17 +1038,23 @@ export class SolicitacoesEmMemoria extends RepositorioDeSolicitacoes {
     );
   }
 
+  /** Em ordem de (`solicitadaEm`, `id`), depois do cursor, como o adaptador. */
   override listarPorStatus(
     tipo: TipoDeSolicitacao,
     status: StatusDaSolicitacao,
     quantidade: number,
+    depoisDe: CursorDeSolicitacao | null = null,
   ): Promise<readonly SolicitacaoDoTitular[]> {
+    const ordem = (a: CursorDeSolicitacao, b: CursorDeSolicitacao): number =>
+      a.solicitadaEm.getTime() - b.solicitadaEm.getTime() ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     return comoPromessa(() =>
       this.#tabela
         .valores()
         .filter((s) => s.tipo === tipo && s.status === status)
-        .sort((a, b) => a.solicitadaEm.getTime() - b.solicitadaEm.getTime())
-        .slice(0, quantidade),
+        .filter((s) => depoisDe === null || ordem(s, depoisDe) > 0)
+        .sort(ordem)
+        .slice(0, Math.max(0, quantidade)),
     );
   }
 

@@ -112,6 +112,30 @@ export class RepositorioDeCodigosDeVerificacaoPrisma extends RepositorioDeCodigo
     // Todas as finalidades: os desafios da conta vão junto (mesma tabela).
     await this.unidade.cliente().codigoDeVerificacao.deleteMany({ where: { contaId } });
   }
+
+  override async travarEmissao(contaId: string, finalidade: FinalidadeDoCodigo): Promise<void> {
+    const transacao = exigirTransacao(this.unidade, 'travarEmissao');
+    // `$executeRaw`: a função devolve `void`, que o `$queryRaw` não sabe ler.
+    await transacao.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${`identidade.codigos:${contaId}:${finalidade}`}, 0))`;
+  }
+
+  override async contarEmitidosDesde(
+    contaId: string,
+    finalidade: FinalidadeDoCodigo,
+    desde: Date,
+  ): Promise<number> {
+    if (!ehUuid(contaId)) return 0;
+    return this.unidade.cliente().codigoDeVerificacao.count({
+      where: { contaId, finalidade, criadoEm: { gt: desde } },
+    });
+  }
+
+  override apagarEncerradosAntes(limite: Date): Promise<number> {
+    // Todas as finalidades: os desafios do 2FA moram na mesma tabela (S81).
+    return this.unidade.cliente().$executeRaw`
+      DELETE FROM identidade.codigos_verificacao WHERE coalesce(usado_em, expira_em) < ${limite}`;
+  }
 }
 
 @Injectable()
@@ -149,6 +173,14 @@ export class RepositorioDeDesafiosPrisma extends RepositorioDeDesafios {
     return linha === null ? null : paraDesafio(linha);
   }
 
+  override async buscarPorId(id: string): Promise<DesafioDeSegundoFator | null> {
+    if (!ehUuid(id)) return null;
+    const linha = await this.unidade.cliente().codigoDeVerificacao.findFirst({
+      where: { id, finalidade: { in: [...FINALIDADES_DE_DESAFIO] } },
+    });
+    return linha === null ? null : paraDesafio(linha);
+  }
+
   override async invalidarVigentes(
     contaId: string,
     etapa: EtapaDoDesafio,
@@ -165,6 +197,22 @@ export class RepositorioDeDesafiosPrisma extends RepositorioDeDesafios {
       },
       data: { usadoEm: agora },
     });
+  }
+
+  override async apagarDaConta(contaId: string): Promise<void> {
+    if (!ehUuid(contaId)) return;
+    await this.unidade.cliente().codigoDeVerificacao.deleteMany({
+      where: { contaId, finalidade: { in: [...FINALIDADES_DE_DESAFIO] } },
+    });
+  }
+
+  override async somarTentativasDesde(contaId: string, desde: Date): Promise<number> {
+    if (!ehUuid(contaId)) return 0;
+    const soma = await this.unidade.cliente().codigoDeVerificacao.aggregate({
+      where: { contaId, finalidade: { in: [...FINALIDADES_DE_DESAFIO] }, criadoEm: { gt: desde } },
+      _sum: { tentativas: true },
+    });
+    return soma._sum.tentativas ?? 0;
   }
 }
 
