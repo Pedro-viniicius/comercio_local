@@ -96,12 +96,12 @@ Vale para produção e homologação.
 
 ## 4. GitHub e cadeia de suprimentos
 
-- [ ] **(obrigatório, S12)** `pnpm audit --prod --audit-level=high` bloqueante no CI e verde. Verde desde 2026-10-18, com o Prisma 7.10.1.
+- [ ] **(obrigatório, S12)** `pnpm audit --prod --audit-level=high` bloqueante no CI e verde. Ficou vermelho no CI de 2026-10-26 (avisos de 2026-10-22 e 23 em body-parser, multer, nodemailer e fast-uri) e voltou a ficar verde no mesmo dia, com as versões corrigidas e o override do multer (ADR-013).
 - [ ] Workflows com `permissions: contents: read` e actions fixadas por SHA (ver `.github/workflows/`).
 - [ ] Pull request de fork roda sem acesso a segredos.
 - [ ] Segredos do CI só em GitHub secrets.
 - [ ] Dependabot ativo (`.github/dependabot.yml`).
-- [ ] `pnpm install --frozen-lockfile` sem alteração no lockfile. `saveExact`, `minimumReleaseAge` e `allowBuilds` continuam no `pnpm-workspace.yaml`.
+- [ ] `pnpm install --frozen-lockfile` sem alteração no lockfile. `saveExact`, `minimumReleaseAge` e `allowBuilds` continuam no `pnpm-workspace.yaml`; nenhuma linha de `overrides` sobrando (cada uma só enquanto o pacote de cima ainda exigir a versão vulnerável).
 
 ## 5. Migrações no deploy
 

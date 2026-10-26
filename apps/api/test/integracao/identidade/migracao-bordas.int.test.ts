@@ -393,15 +393,19 @@ describe('seed: um documento já gravado (e revisado) nunca é sobrescrito (S79,
       `INSERT INTO identidade.documentos_legais (tipo, versao, conteudo, vigente_desde)
        VALUES ('termos', '1.0', 'Texto revisado pelo advogado', '2026-01-02T03:04:05Z')`,
     );
-    const resultado = spawnSync(process.execPath, ['src/cli/seed.ts'], {
-      cwd: PASTA_DA_API,
-      env: {
-        PATH: process.env['PATH'] ?? '',
-        NODE_ENV: 'test',
-        DATABASE_URL_MIGRACAO: URL_MIGRACAO_TESTE,
+    const resultado = spawnSync(
+      process.execPath,
+      ['--conditions=@bairrin/fonte', 'src/cli/seed.ts'],
+      {
+        cwd: PASTA_DA_API,
+        env: {
+          PATH: process.env['PATH'] ?? '',
+          NODE_ENV: 'test',
+          DATABASE_URL_MIGRACAO: URL_MIGRACAO_TESTE,
+        },
+        encoding: 'utf8',
       },
-      encoding: 'utf8',
-    });
+    );
 
     expect(resultado.status).toBe(0);
     // A política não existia: entra. Os termos já existiam: ficam como estão.

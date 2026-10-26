@@ -894,7 +894,7 @@ describe('seed dos documentos legais (S24, S79)', () => {
    * conecta como o dono (`DATABASE_URL_MIGRACAO`), porque a aplicação não inclui documento.
    */
   function rodarSeed(ambiente: Record<string, string>) {
-    return spawnSync(process.execPath, ['src/cli/seed.ts'], {
+    return spawnSync(process.execPath, ['--conditions=@bairrin/fonte', 'src/cli/seed.ts'], {
       cwd: PASTA_DA_API,
       env: {
         PATH: process.env['PATH'] ?? '',
@@ -952,11 +952,15 @@ describe('seed dos documentos legais (S24, S79)', () => {
   });
 
   it('sem DATABASE_URL_MIGRACAO, sai com erro, mesmo com a DATABASE_URL da aplicação', () => {
-    const resultado = spawnSync(process.execPath, ['src/cli/seed.ts'], {
-      cwd: PASTA_DA_API,
-      env: { PATH: process.env['PATH'] ?? '', NODE_ENV: 'test', DATABASE_URL: URL_APP_TESTE },
-      encoding: 'utf8',
-    });
+    const resultado = spawnSync(
+      process.execPath,
+      ['--conditions=@bairrin/fonte', 'src/cli/seed.ts'],
+      {
+        cwd: PASTA_DA_API,
+        env: { PATH: process.env['PATH'] ?? '', NODE_ENV: 'test', DATABASE_URL: URL_APP_TESTE },
+        encoding: 'utf8',
+      },
+    );
     expect(resultado.status).toBe(1);
     expect(resultado.stderr).toContain('DATABASE_URL_MIGRACAO não definida');
   });

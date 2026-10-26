@@ -151,6 +151,7 @@ No pnpm 12, as regras ficam no `pnpm-workspace.yaml`, não no `.npmrc` (este só
 - `minimumReleaseAge: 4320`: em minutos, ou seja, 3 dias. Vale também para as transitivas.
 - `allowBuilds` com `strictDepBuilds: true`: só os pacotes listados rodam script de instalação. Pacote novo com script faz a instalação falhar até alguém decidir `true` ou `false`.
 - Versões compartilhadas (`typescript`, `vitest`, `zod`, `@types/node`) ficam no `catalog:` do mesmo arquivo.
+- `overrides`: só para correção de segurança em transitiva que o pacote de cima fixa sem faixa. Cada linha cita o GHSA e usa o seletor `pai>filho@<versão corrigida>`, que deixa de valer sozinho quando o pacote de cima subir; revise a lista a cada atualização desse pacote (hoje: multer sob `@nestjs/platform-express`).
 
 O plano falava em `save-exact` no `.npmrc` e em `onlyBuiltDependencies`; no pnpm 12 esses nomes não valem mais (ADR-013).
 

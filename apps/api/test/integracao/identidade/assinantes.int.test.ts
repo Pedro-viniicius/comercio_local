@@ -500,14 +500,22 @@ describe('seed:admin (CA-07)', () => {
     ).resolves.toMatchObject({ tipo: 'desafio', desafio: { etapa: 'configurar' } });
   });
 
-  /** Roda a CLI com a entrada padrão dada, sem o ambiente (nada chega a conectar). */
+  /**
+   * Roda a CLI com a entrada padrão dada, sem o ambiente (nada chega a conectar). A condição
+   * `@bairrin/fonte` resolve `@bairrin/*` para o código-fonte, como no Vitest: no CI a
+   * integração roda antes do build e não há `dist`.
+   */
   const rodarCli = (argumentos: string[], linhas: string[]) =>
-    spawnSync(process.execPath, ['src/cli/seed-admin.ts', ...argumentos], {
-      cwd: PASTA_DA_API,
-      env: { PATH: process.env['PATH'] ?? '' },
-      input: linhas.map((linha) => `${linha}\n`).join(''),
-      encoding: 'utf8',
-    });
+    spawnSync(
+      process.execPath,
+      ['--conditions=@bairrin/fonte', 'src/cli/seed-admin.ts', ...argumentos],
+      {
+        cwd: PASTA_DA_API,
+        env: { PATH: process.env['PATH'] ?? '' },
+        input: linhas.map((linha) => `${linha}\n`).join(''),
+        encoding: 'utf8',
+      },
+    );
 
   it('a CLI com telefone inválido encerra com erro sem criar nada', async () => {
     const email = emailUnico('admin-cli');
