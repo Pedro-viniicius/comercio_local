@@ -2,6 +2,9 @@
 import { objetoEstrito, z } from '../zod.ts';
 import { senhaAtualSchema } from './contas.ts';
 
+/** Motivo do 400 da senha errada na exclusão; a tela mostra `erro.senha.invalido`. */
+export const MOTIVO_SENHA_INCORRETA = 'Senha incorreta';
+
 /**
  * `GET /v1/privacidade`. `aceitoEm` é a data do aceite da política vigente
  * (`null` se a conta não a aceitou, como o admin criado por CLI);
@@ -21,12 +24,15 @@ export type Privacidade = z.infer<typeof privacidadeSchema>;
  * `POST /v1/privacidade/exclusao`, com a senha atual (no freio por e-mail,
  * S14). A exportação (`POST /v1/privacidade/exportacao`) não tem corpo
  * (`corpoVazioSchema`) e responde 202, uma por 24 h; o arquivo sai em `GET
- * /v1/privacidade/exportacao/arquivo` (uso único, 7 dias). Respostas da
- * exclusão: 202; 400 `campos[senha].invalido` com a senha errada; 409
- * `exclusao_com_pendencias` com o aviso de pendências (CA-11); 429 com
- * `Retry-After` no freio por e-mail. A senha errada não dá 401: numa rota
- * autenticada, só a guarda devolve 401 (sessão ausente ou inválida), e o
- * cliente renovaria a sessão e repetiria o pedido.
+ * /v1/privacidade/exportacao/arquivo` (uso único, 7 dias; `HEAD` → 405
+ * `metodo_nao_permitido` com `Allow: GET`, Q31). Respostas da exclusão: 202;
+ * 400 `campos[senha].invalido` com a senha errada (`MOTIVO_SENHA_INCORRETA`);
+ * 403 `exclusao_de_admin_so_pelo_painel` para conta com perfil `admin` fora da
+ * sessão do painel com segundo fator (S113); 409 `exclusao_com_pendencias` com
+ * o aviso de pendências (CA-11); 429 com `Retry-After` no freio por e-mail. A
+ * senha errada não dá 401: numa rota autenticada, só a guarda devolve 401
+ * (sessão ausente ou inválida), e o cliente renovaria a sessão e repetiria o
+ * pedido.
  */
 export const solicitarExclusaoSchema = objetoEstrito({ senha: senhaAtualSchema });
 export type SolicitarExclusao = z.infer<typeof solicitarExclusaoSchema>;

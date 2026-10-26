@@ -3,8 +3,12 @@
 //
 // Três passos, e a senha é conferida entre duas transações curtas, sem conexão
 // aberta nem trava (S91, como o login):
-// 1. reserva da tentativa, numa transação: trava o freio por e-mail da conta
-//    (S14: a senha da exclusão soma no mesmo freio do login e da redefinição);
+// 1. reserva da tentativa, numa transação: conta com perfil `admin` fora da
+//    sessão do painel com segundo fator devolve `admin_fora_do_painel` antes
+//    do freio e da senha, sem gastar o freio (S113, decisão do dono de
+//    2026-10-23: o 2FA protege a conta do admin, não só o painel). Depois,
+//    trava o freio por e-mail da conta (S14: a senha da exclusão soma no
+//    mesmo freio do login e da redefinição);
 //    freio ativo devolve `freado` sem conferir a senha. Relê a conta com o
 //    freio travado e já conta uma falha: tentativas simultâneas não passam do
 //    limiar;
@@ -54,6 +58,12 @@ export interface EntradaDaSolicitacaoDeExclusao {
   contaId: string;
   /** Senha atual, como digitada (o `Hasher` normaliza). */
   senha: string;
+  /**
+   * A sessão tem `admin` e segundo fator (`mfa`): só a sessão do painel depois
+   * do 2FA. Conta com perfil `admin` só se exclui com ela (S113). Omitido vale
+   * `false` (falha fechada): só a conta sem `admin` segue.
+   */
+  sessaoDeAdminComMfa?: boolean;
 }
 
 /**
@@ -63,6 +73,8 @@ export interface EntradaDaSolicitacaoDeExclusao {
  * - `freado`: freio por e-mail ativo, senha não conferida (429 com
  *   `Retry-After` = `segundosDeEspera`);
  * - `com_pendencias`: a exclusão aguarda (409 com o aviso);
+ * - `admin_fora_do_painel`: conta com perfil `admin` sem a sessão do painel
+ *   com segundo fator; nada muda e o freio não conta (403, S113);
  * - `conta_indisponivel`: a conta deixou de estar ativa entre a guarda e o caso
  *   de uso (corrida com outra exclusão); a próxima requisição já cai na guarda.
  */
@@ -71,10 +83,12 @@ export type ResultadoDaSolicitacaoDeExclusao =
   | { tipo: 'senha_incorreta' }
   | { tipo: 'freado'; segundosDeEspera: number }
   | { tipo: 'com_pendencias'; pendencias: readonly PendenciaDeExclusao[] }
+  | { tipo: 'admin_fora_do_painel' }
   | { tipo: 'conta_indisponivel' };
 
 const CONTA_INDISPONIVEL = { tipo: 'conta_indisponivel' } as const;
 const SENHA_INCORRETA = { tipo: 'senha_incorreta' } as const;
+const ADMIN_FORA_DO_PAINEL = { tipo: 'admin_fora_do_painel' } as const;
 
 /** A conta saiu de `ativa` entre a releitura e a desativação: desfaz tudo. */
 class ContaIndisponivelNoMeio extends Error {
@@ -108,9 +122,12 @@ export class SolicitarExclusaoCasoDeUso {
   async executar({
     contaId,
     senha,
+    sessaoDeAdminComMfa = false,
   }: EntradaDaSolicitacaoDeExclusao): Promise<ResultadoDaSolicitacaoDeExclusao> {
     const agora = this.relogio.agora();
-    const reserva = await this.unidade.executar(() => this.#reservar(contaId, agora));
+    const reserva = await this.unidade.executar(() =>
+      this.#reservar(contaId, sessaoDeAdminComMfa, agora),
+    );
     if (reserva.tipo === 'resolvida') return reserva.resultado;
 
     // Fora de transação: o Argon2id não segura conexão nem trava (S91).
@@ -124,12 +141,20 @@ export class SolicitarExclusaoCasoDeUso {
     }
   }
 
-  /** Passo 1: trava o freio, relê a conta e conta a falha da tentativa. */
-  async #reservar(contaId: string, agora: Date): Promise<Reserva> {
-    // O e-mail da conta ativa não muda; a leitura sem trava serve só para a chave do freio.
+  /**
+   * Passo 1: recusa o admin fora do painel, trava o freio, relê a conta e
+   * conta a falha da tentativa.
+   */
+  async #reservar(contaId: string, sessaoDeAdminComMfa: boolean, agora: Date): Promise<Reserva> {
+    // O e-mail da conta ativa não muda; a leitura sem trava serve para a chave do freio e
+    // para o perfil (o `admin` só se concede pela CLI `seed:admin`, CA-07).
     const lida = await this.contas.buscarPorId(contaId);
     if (lida === null || lida.status !== 'ativa') {
       return { tipo: 'resolvida', resultado: CONTA_INDISPONIVEL };
+    }
+    // Antes do freio e da senha (S113): a recusa não soma falha nem gasta um hash.
+    if (lida.temPerfil('admin') && !sessaoDeAdminComMfa) {
+      return { tipo: 'resolvida', resultado: ADMIN_FORA_DO_PAINEL };
     }
     const chave = chaveDoFreioPorEmail(this.cifrador, lida.email);
     const freio = await this.bloqueios.buscarParaAtualizar(chave, 'email', agora);

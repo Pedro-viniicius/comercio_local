@@ -17,7 +17,7 @@ Cada ADR registra uma decisão que muda como o Bairrin é construído: o context
 | [009](0009-conexao-instavel-cache-fila-e-idempotencia.md) | Cache público, fila offline cifrada e `Idempotency-Key`              | Futuro (plano 02 em diante)                       |
 | [010](0010-api-rest-v1-e-contratos-zod.md)                | REST `/v1`, contratos zod, Problem Details, cursor                   | Base pronta; autorização é do plano 01b           |
 | [011](0011-eventos-com-outbox-e-pg-boss.md)               | Outbox e pg-boss, pelo menos uma vez, assinantes idempotentes        | Pronto                                            |
-| [012](0012-sessao-e-autenticacao.md)                      | JWT de 15 minutos com renovação opaca rotativa; TOTP no admin        | Futuro (plano 01b); o ADR é completado lá         |
+| [012](0012-sessao-e-autenticacao.md)                      | JWT de 15 minutos com renovação opaca rotativa; TOTP no admin        | Implementado na API e no painel (plano 01b)       |
 | [013](0013-piramide-de-testes-e-ci.md)                    | Pirâmide de testes, CI e cadeia de suprimentos                       | Testes e CI prontos; CI ainda não rodou no GitHub |
 | [014](0014-observabilidade-backups-e-operacao.md)         | Observabilidade, backups e operação                                  | Saúde e logs prontos; o resto depende do deploy   |
 | [015](0015-dado-pessoal-auditoria-e-anonimizacao.md)      | Auditoria sem dado pessoal, anonimização por módulo e retenções      | Núcleo pronto; cada módulo entrega o seu          |

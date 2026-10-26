@@ -21,7 +21,10 @@ export const LIMITES_DA_IDENTIDADE = {
    * sobrar folga para quem divide o IP da operadora (CGNAT).
    */
   entrarPorIp: { nome: 'entrar-ip', por: 'ip', limite: 100, janelaEmMs: QUINZE_MINUTOS_EM_MS },
-  /** `POST /v1/conta/verificacao-email/reenvio`: 3 por hora por conta (a rota não recebe e-mail). */
+  /**
+   * `POST /v1/conta/verificacao-email/reenvio`: 3 por hora por conta (a rota não recebe
+   * e-mail), conferido antes do limite por IP (etapa 19).
+   */
   reenvioPorConta: { nome: 'reenvio-conta', por: 'conta', limite: 3, janelaEmMs: UMA_HORA_EM_MS },
   /** `POST /v1/conta/verificacao-email/reenvio`: 10 por hora por IP. */
   reenvioPorIp: { nome: 'reenvio-ip', por: 'ip', limite: 10, janelaEmMs: UMA_HORA_EM_MS },

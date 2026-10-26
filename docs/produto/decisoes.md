@@ -2,6 +2,11 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-23 — Decisão do dono: exclusão da conta do administrador (S113)
+- Contexto: revisão do grupo F do 01b (etapa 19). O `seguranca` mostrou que quem tem só a senha do admin, sem o segundo fator, entra pelo app (que não pede TOTP) e exclui a conta do admin; o painel ficaria sem administrador até um novo `seed:admin` pelo servidor.
+- Decisão: conta com perfil `admin` só pede a própria exclusão numa sessão do painel com `admin` e `mfa` (segundo fator concluído). De outra sessão, a API responde 403 com a orientação de usar o painel.
+- Motivo: recomendação do `seguranca`; o 2FA passa a proteger a conta do admin, não só o painel.
+
 ## 2026-10-21 — Decisão do dono: nome nos e-mails (S102) e teto diário do 2FA (S103)
 - Contexto: revisão do grupo D do 01b (etapa 13). O `seguranca` mostrou que o nome escolhido no cadastro chega, num e-mail legítimo do Bairrin, a um endereço que ninguém verificou (S102, uso para phishing), e que o freio de segundo fator não tem teto diário: 4 erros a cada 15 min nunca acionam a espera, e a calma de 15 min zera o nível, então a P16 nunca dispara (S103).
 - Decisão (S102): e-mail para conta com e-mail ainda não verificado não leva o nome ("Olá!"); o e-mail de verificação nunca leva o nome. Depois da verificação, o nome volta.

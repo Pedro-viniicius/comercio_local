@@ -21,6 +21,7 @@ import {
 } from '../../src/compartilhado/autenticacao/verificador-de-acesso.ts';
 import { carregarAmbiente } from '../../src/compartilhado/config/ambiente.ts';
 import { TAMANHO_MAXIMO_DO_TOKEN_DE_ACESSO } from '../../src/compartilhado/http/autenticacao/autenticado.guard.ts';
+import { ConfereSessao } from '../../src/compartilhado/http/autenticacao/confere-sessao.decorator.ts';
 import { ContaAtual } from '../../src/compartilhado/http/autenticacao/conta-atual.decorator.ts';
 import { ExigeMfa } from '../../src/compartilhado/http/autenticacao/exige-mfa.guard.ts';
 import { Perfis } from '../../src/compartilhado/http/autenticacao/perfis.guard.ts';
@@ -86,6 +87,23 @@ class RotasProtegidas {
   quem(@ContaAtual() conta: ContaAutenticada) {
     return { contaId: conta.contaId, sid: conta.sid };
   }
+
+  /** Rota sensível fora de /v1/admin: a sessão do `sid` também é conferida (etapa 19). */
+  @Get('com-sessao')
+  @ConfereSessao()
+  comSessao(@ContaAtual() conta: ContaAutenticada) {
+    return { contaId: conta.contaId };
+  }
+}
+
+/** `@ConfereSessao()` no controller vale para todas as rotas dele. */
+@ConfereSessao()
+@Controller('teste/protegida-no-controller')
+class RotasQueConferemSessao {
+  @Get()
+  quem(@ContaAtual() conta: ContaAutenticada) {
+    return { contaId: conta.contaId };
+  }
 }
 
 /** Rotas de admin como as do painel (S7): perfil `admin` e segundo fator. */
@@ -150,6 +168,17 @@ class RotasLimitadas {
   porConta() {
     return { ok: true };
   }
+
+  // O IP vem antes no decorador de propósito: a guarda confere a conta primeiro
+  // mesmo assim (etapa 19, CGNAT).
+  @Post('por-conta-e-ip')
+  @LimitarRota(
+    { nome: 'ip', por: 'ip', limite: 3, janelaEmMs: 60_000 },
+    { nome: 'conta', por: 'conta', limite: 1, janelaEmMs: 60_000 },
+  )
+  porContaEIp() {
+    return { ok: true };
+  }
 }
 
 /** Tokens que o verificador falso aceita, com a conta de cada um. */
@@ -167,8 +196,19 @@ const CONTA_ADMIN: ContaAutenticada = {
   mfa: true,
   emailVerificado: true,
 };
+const OUTRA_CONTA: ContaAutenticada = {
+  ...CONTA_COMUM,
+  contaId: '55555555-5555-4555-8555-555555555555',
+  sid: '65555555-5555-4555-8555-555555555555',
+};
 const TOKENS: Readonly<Record<string, ContaAutenticada>> = {
   'token.comum': CONTA_COMUM,
+  'token.outra': OUTRA_CONTA,
+  'token.terceira': {
+    ...CONTA_COMUM,
+    contaId: '77777777-7777-4777-8777-777777777777',
+    sid: '87777777-7777-4777-8777-777777777777',
+  },
   'token.admin': CONTA_ADMIN,
   'token.admin-sem-mfa': { ...CONTA_ADMIN, mfa: false },
   'token.mfa-sem-admin': { ...CONTA_COMUM, mfa: true },
@@ -234,6 +274,7 @@ async function subir(
     controllers: [
       RotasDeTeste,
       RotasProtegidas,
+      RotasQueConferemSessao,
       RotasDeAdminDeTeste,
       RotaDeAdminEsquecida,
       RotaDeAdminPublicaPorEngano,
@@ -562,6 +603,29 @@ describe('autenticação global (S7, S8)', () => {
     ]);
   });
 
+  it('rota com `@ConfereSessao()` fora de /v1/admin: a sessão do `sid` é conferida, sem exigir admin (etapa 19)', async () => {
+    const { http, verificador } = await subir();
+    const resposta = await http
+      .get('/teste/protegida/com-sessao')
+      .set('Authorization', 'Bearer token.comum')
+      .expect(200);
+    expect(resposta.body).toEqual({ contaId: CONTA_COMUM.contaId });
+    await http
+      .get('/teste/protegida-no-controller')
+      .set('Authorization', 'Bearer token.comum')
+      .expect(200);
+    // O verificador recusa (sessão revogada, por exemplo): 401 da guarda, como sem token.
+    await http
+      .get('/teste/protegida/com-sessao')
+      .set('Authorization', 'Bearer token.x')
+      .expect(401);
+    expect(verificador.chamadas).toEqual([
+      { token: 'token.comum', opcoes: { conferirSessao: true } },
+      { token: 'token.comum', opcoes: { conferirSessao: true } },
+      { token: 'token.x', opcoes: { conferirSessao: true } },
+    ]);
+  });
+
   it('/v1/saude continua pública', async () => {
     const { http, verificador } = await subir();
     await http.get('/v1/saude').expect(200);
@@ -732,6 +796,23 @@ describe('limites por rota (S14, S82)', () => {
     await http.post(rota).set('Authorization', 'Bearer token.comum').expect(201);
     await http.post(rota).set('Authorization', 'Bearer token.comum').expect(429);
     await http.post(rota).set('Authorization', 'Bearer token.admin').expect(201);
+  });
+
+  it('a conta é conferida antes do IP: a recusa por conta não gasta o limite do IP (etapa 19, CGNAT)', async () => {
+    const { http } = await subir();
+    const rota = '/teste/limitada/por-conta-e-ip';
+    const como = (token: string) => http.post(rota).set('Authorization', `Bearer ${token}`);
+    await como('token.comum').expect(201);
+    // Muitas recusas da mesma conta, do mesmo IP: todas pelo limite da conta.
+    for (let vez = 0; vez < 5; vez += 1) {
+      const recusa = await como('token.comum').expect(429);
+      expect(recusa.headers['retry-after']).toMatch(/^[1-9]\d*$/);
+    }
+    // O IP só contou o pedido aceito: outras duas contas ainda cabem no limite dele (3).
+    await como('token.outra').expect(201);
+    await como('token.admin').expect(201);
+    // Agora o IP estourou: a conta seguinte, ainda dentro do próprio limite, cai no do IP.
+    await como('token.terceira').expect(429);
   });
 });
 

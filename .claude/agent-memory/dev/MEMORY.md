@@ -21,4 +21,6 @@
 - [2FA do admin](identidade-2fa.md) — helpers em segundo-fator/comum.ts, emissão invalida desafios, teste do R8 nos fakes, CLI por createApplicationContext
 - [Assinantes e tarefas da Identidade](assinantes-tarefas-identidade.md) — trigger no Prisma (P2039), marca do S15, freio e-mail no início do 2FA, Q29, advisory locks, operador na integração
 - [Repositórios Prisma da Identidade](repositorios-prisma-identidade.md) — erro do PG aborta a transação, ON CONFLICT DO UPDATE no freio, NO KEY UPDATE x FK, pausa do qa, pg_locks, S78
-- [Borda HTTP da Identidade](http-identidade-etapa16.md) — /v1/admin por metadados + rota casada, IP primeiro nos limites, ordem dos APP_GUARD, trust proxy nos testes, spawn da CLI, teste de tempo, scratchpad dividido
+- [Borda HTTP da Identidade](http-identidade-etapa16.md) — /v1/admin por metadados + rota casada, limites (IP primeiro na 16; a 19 passou a conta→IP→e-mail), ordem dos APP_GUARD, trust proxy nos testes, spawn da CLI, teste de tempo, scratchpad dividido
+- [Docs da Identidade (20a)](docs-identidade-20a.md) — fontes de verdade, Sentry não recebe warn do pino, ordem conta→IP→e-mail da 19, regex \1200 em tabela
+- [Testes transversais da Identidade (19)](http-identidade-etapa19.md) — cenario-http, roteador do Express 5, HEAD cai no GET, token sem mfa, contas iguais, JWT e relógio, foco

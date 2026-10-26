@@ -16,6 +16,9 @@
 //   caminho da rota que o Express casou (`req.baseUrl` + `req.route.path`,
 //   que já trazem o `setGlobalPrefix` e o `RouterModule`), nunca da URL
 //   pedida, que o Express casa sem diferenciar maiúsculas.
+// - Rotas com `@ConfereSessao()` (etapa 19): a sessão do `sid` também é
+//   conferida, como em `/v1/admin`, sem exigir `admin`; sessão revogada ou
+//   vencida → 401. Nas demais, só `contas.status` (S8).
 // - A conta vai para a requisição (`@ContaAtual()`).
 import {
   type CanActivate,
@@ -31,6 +34,7 @@ import {
   type ContaAutenticada,
   VerificadorDeAcesso,
 } from '../../autenticacao/verificador-de-acesso.ts';
+import { CONFERE_SESSAO } from './confere-sessao.decorator.ts';
 import { CONTA_DA_REQUISICAO, type RequisicaoAutenticada } from './conta-atual.decorator.ts';
 import { ROTA_PUBLICA } from './publico.decorator.ts';
 
@@ -131,7 +135,13 @@ export class Autenticado implements CanActivate {
     const token = tokenDoCabecalho(req.headers['authorization']);
     if (token === null) throw new UnauthorizedException();
 
-    const conta = await this.verificador.verificar(token, { conferirSessao: admin });
+    const confereSessao =
+      admin ||
+      this.reflector.getAllAndOverride<boolean | undefined>(CONFERE_SESSAO, [
+        contexto.getHandler(),
+        contexto.getClass(),
+      ]) === true;
+    const conta = await this.verificador.verificar(token, { conferirSessao: confereSessao });
     if (conta === null) throw new UnauthorizedException();
     if (admin && !podeUsarAdmin(conta)) {
       this.logger.warn({ contaId: conta.contaId }, 'acesso negado a rota de admin');

@@ -1044,6 +1044,14 @@ describe('guarda global: token fora do lugar, adulterado, vencido ou de conta de
 // Concorrência
 
 describe('concorrência pelas rotas', () => {
+  // Servidor que o supertest abre por requisição (sem `listen`): cada pedido simultâneo
+  // põe 3 `once` no mesmo `Server`, e 11 ou mais disparam o `MaxListenersExceededWarning`
+  // do Node. Não é vazamento (os ouvintes saem quando o pedido acaba); o teto só segue o
+  // tamanho da maior rajada do arquivo (15).
+  beforeAll(() => {
+    api.app.getHttpServer().setMaxListeners(40);
+  });
+
   it('seis cadastros simultâneos do mesmo e-mail novo: todos 202 iguais, uma conta só, sem 5xx', async () => {
     const email = emailUnico('simultaneo');
     freiosDoTeste.push(p.servicos.cifrador.hmac('bloqueio_email', [email]));

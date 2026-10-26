@@ -42,6 +42,10 @@ const titulo = () => document.title;
 // O título é gravado num efeito do React, que pode rodar depois do `findByRole` (flaky sob carga).
 const esperarTitulo = (esperado: string) => waitFor(() => expect(titulo()).toBe(esperado));
 const focado = () => document.activeElement;
+// O foco no título do passo também vem de um efeito (`useEffect` em `passo`). O React agenda
+// efeitos passivos pelo Scheduler (`setImmediate` no Node), e o `findByRole` pode resolver
+// logo depois de o título entrar no DOM, antes do efeito (flaky sob carga, grupos D e E).
+const esperarFoco = (esperado: Element) => waitFor(() => expect(focado()).toBe(esperado));
 
 describe('P1: foco e título', () => {
   it('ao abrir, o foco vai para o e-mail e a aba se chama "Entrar · Bairrin Painel"', async () => {
@@ -210,14 +214,14 @@ describe('P1b: o foco acompanha o passo', () => {
 
     fireEvent.click(screen.getByRole('button', { name: t.configuracao.passo1.botao }));
     const passo2 = await screen.findByRole('heading', { name: t.configuracao.passo2.titulo });
-    expect(focado()).toBe(passo2);
+    await esperarFoco(passo2);
     expect(passo2.getAttribute('tabindex')).toBe('-1');
     expect(screen.getByText(textos.componentes.passo(2, 3))).toBeTruthy();
 
     preencher(t.configuracao.passo2.codigo, '654321');
     fireEvent.click(screen.getByRole('button', { name: t.configuracao.passo2.botao }));
     const passo3 = await screen.findByRole('heading', { name: t.configuracao.passo3.titulo });
-    expect(focado()).toBe(passo3);
+    await esperarFoco(passo3);
     expect(screen.getByText(textos.componentes.passo(3, 3))).toBeTruthy();
     await esperarTitulo(t.tituloDaAba(t.configuracao.titulo));
   });

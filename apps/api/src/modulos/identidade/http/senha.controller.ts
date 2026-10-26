@@ -1,9 +1,9 @@
 // Recuperação e redefinição de senha (plano 01b, etapa 16; CA-05, CA-06;
 // P1-dono, S14, S74, S82, S93).
 //
-// - `POST /v1/senha/recuperacao` (público): 202 sem corpo, sempre, exista ou
+// - `POST /v1/senha/recuperacao` (público): 202 sem corpo, o mesmo exista ou
 //   não conta com o e-mail (CA-06). Limites de 10 por hora por IP e 3 por
-//   hora por e-mail, nessa ordem (S109).
+//   hora por e-mail, nessa ordem (S109): estourados, 429 com `Retry-After`.
 // - `POST /v1/senha/redefinicao` (público): 204 (senha trocada, e-mail
 //   verificado e todas as sessões revogadas, CA-05); código que não confere →
 //   400 `campos[codigo].invalido`; freio por e-mail ou por origem → 429 com

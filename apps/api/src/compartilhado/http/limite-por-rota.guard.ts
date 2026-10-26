@@ -22,13 +22,18 @@
 //   400 logo depois), mas o limite por IP da mesma rota continua valendo.
 // O valor da chave entra só no hash (SHA-256) que indexa o contador em memória.
 //
-// Ordem (S109): os limites `por: 'ip'` são conferidos primeiro, qualquer que
-// seja a ordem no decorador; depois os por conta e por e-mail, na ordem
-// declarada. A conferência para no primeiro limite estourado, e o contador já
-// estourado não cresce: assim um IP bloqueado não gasta o contador de e-mail
-// nenhum (não bloqueia a recuperação de terceiros em massa nem cria chaves
-// novas na memória a cada e-mail inventado). O preço é a recusa por conta ou
-// por e-mail também contar no limite por IP.
+// Ordem, qualquer que seja a do decorador: conta, IP e e-mail; dentro de cada
+// tipo, a declarada. A conferência para no primeiro limite estourado, e o
+// contador já estourado não cresce.
+// - IP antes do e-mail (S109): o e-mail o cliente escolhe à vontade, então um
+//   IP bloqueado não gasta o contador de e-mail nenhum (não bloqueia a
+//   recuperação de terceiros em massa nem cria chaves novas na memória a cada
+//   e-mail inventado). O preço é a recusa por e-mail também contar no IP.
+// - Conta antes do IP (etapa 19, vindo do grupo E): a conta é a do token, que
+//   o cliente não troca à vontade, então a recusa por conta não gasta o
+//   limite do IP, e uma conta insistente atrás de CGNAT não esgota a cota do
+//   IP que ela divide com outras pessoas. Com o IP já bloqueado, o pedido
+//   ainda conta no limite da própria conta.
 import { createHash } from 'node:crypto';
 import { type CanActivate, type ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -64,7 +69,7 @@ export const IP_DESCONHECIDO = 'ip:desconhecido';
 /** Prefixo do IPv6 agrupado (S14). */
 const PREFIXO_DO_IPV6 = 64;
 
-/** Declara os limites da rota: os por IP primeiro, os demais na ordem dada (S109). */
+/** Declara os limites da rota, conferidos na ordem conta, IP e e-mail (S109, etapa 19). */
 export const LimitarRota = (...limites: LimiteDaRota[]): MethodDecorator =>
   SetMetadata(LIMITES_DA_ROTA, limites);
 
@@ -99,12 +104,16 @@ export function valorDaChave(req: Requisicao, por: ChaveDoLimite): string | null
   }
 }
 
-/** Os limites por IP primeiro; os demais mantêm a ordem declarada (S109). */
+/**
+ * Posição de cada tipo de chave na conferência (S109, etapa 19). `Record` e não
+ * lista: um tipo novo em `ChaveDoLimite` sem posição aqui é erro de compilação,
+ * em vez de um limite descartado em silêncio (S112).
+ */
+const POSICAO_DA_CHAVE: Readonly<Record<ChaveDoLimite, number>> = { conta: 0, ip: 1, email: 2 };
+
+/** Conta, IP e e-mail, nessa ordem; dentro de cada tipo, a ordem declarada (sort estável). */
 function naOrdemDeConferencia(limites: readonly LimiteDaRota[]): LimiteDaRota[] {
-  return [
-    ...limites.filter((limite) => limite.por === 'ip'),
-    ...limites.filter((limite) => limite.por !== 'ip'),
-  ];
+  return [...limites].sort((a, b) => POSICAO_DA_CHAVE[a.por] - POSICAO_DA_CHAVE[b.por]);
 }
 
 @Injectable()

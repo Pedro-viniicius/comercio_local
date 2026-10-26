@@ -92,29 +92,29 @@ CA-01 cadastro com nome, e-mail, celular validado, senha ≥ 8 e aceite versiona
 **Endpoints** (contratos em `packages/contratos/src/identidade/`; todos estritos; `@Publico()` marcado):
 | Método e caminho | Corpo | Resposta |
 |---|---|---|
-| POST /v1/contas (público) | nome, email, telefone, senha, aceites {termos, privacidade} com versões | 202 mensagem fixa "verifique seu e-mail para continuar" (CA-01, CA-02); versões diferentes das vigentes → 400 (S24) |
+| POST /v1/contas (público) | nome, email, telefone, senha, aceites {termos, privacidade} com versões | 202 mensagem fixa "verifique seu e-mail para continuar" (CA-01, CA-02); versões diferentes das vigentes → 400 (S24) · 429 com `Retry-After` (limite da rota) |
 | POST /v1/conta/verificacao-email (com sessão) (P1-dono) | codigo | 200 sessão renovada com `emailVerificado: true` · 400 código inválido (5 tentativas) · 429 com `Retry-After` com o freio por e-mail da conta ativo (S93) |
-| POST /v1/conta/verificacao-email/reenvio (com sessão) (P1-dono) | — | 202 |
+| POST /v1/conta/verificacao-email/reenvio (com sessão) (P1-dono) | — | 202, a mesma resposta com o e-mail verificado ou não · 429 com `Retry-After` (limites da rota) |
 | POST /v1/sessoes (público) | email, senha, cliente | 200 sessão · 200 {etapa: verificar ou configurar, desafio} (painel) · 403 `sem_acesso_painel` (S23) · 401 mensagem única · 429 com `Retry-After` |
 | POST /v1/sessoes/renovacao (público) | tokenRenovacao e cliente (`app_consumidor` ou `app_lojista`; apps, etapa 5c) ou cookie (painel, com header `X-Cliente: painel`) | 200 sessão · 401 |
 | DELETE /v1/sessoes/renovacao (público; S80) | cookie e `X-Cliente: painel`, corpo vazio | 204 com a origem do painel (também sem cookie ou com cookie desconhecido); revoga a sessão do token, se houver, e apaga o cookie · 403 sem `X-Cliente: painel` ou fora da origem do painel, sem revogar |
 | DELETE /v1/sessoes/atual | — | 204 (CA-05) |
-| POST /v1/senha/recuperacao (público) | email | 202 sempre (CA-06) |
+| POST /v1/senha/recuperacao (público) | email | 202, a mesma resposta exista ou não a conta (CA-06) · 429 com `Retry-After` (limites da rota) |
 | POST /v1/senha/redefinicao (público) | email, codigo, novaSenha | 204; revoga todas as sessões · 400 `campos[codigo].invalido` · 429 com `Retry-After` pelo freio por e-mail ou por origem (S93) |
 | POST /v1/segundo-fator/configuracao (público) | desafio de etapa `configurar` | 200 {otpauthUri, segredoBase32} · 401 (S1) |
 | POST /v1/segundo-fator/confirmacao (público) | desafio de etapa `configurar`, codigo | 200 {codigosRecuperacao[10], sessão} (mostrados uma vez) · 400 `campos[codigo].invalido` · 401 · 429 (regras abaixo) |
 | POST /v1/sessoes/segundo-fator (público) | desafio de etapa `verificar`, codigo ou codigoRecuperacao | 200 sessão · 400 `campos[codigo ou codigoRecuperacao].invalido` · 401 · 429 (regras abaixo) |
-| GET /v1/conta | — | 200 {nome, emailMascarado, perfis} |
+| GET /v1/conta | — | 200 {nome, emailMascarado, perfis} · 401 `conta_indisponivel` (exceção registrada) |
 | GET /v1/privacidade | — | 200 {politica {versao, conteudo}, termos {versao}, aceitoEm, exportacaoDisponivelAte} (CA-10) |
 | POST /v1/privacidade/exportacao | — | 202 (1 por 24 h) |
-| GET /v1/privacidade/exportacao/arquivo (S10) | — | 200 JSON (uso único, até 7 dias) · 404 |
-| POST /v1/privacidade/exclusao | senha | 202 · 400 `campos[senha].invalido` (senha errada; nunca 401) · 409 com aviso de pendências (CA-11) · 429 com `Retry-After` (freio por e-mail) |
-| GET /v1/admin/conta | — | 200 (rota de painel mínima, CA-08) |
+| GET /v1/privacidade/exportacao/arquivo (S10) | — | 200 JSON (uso único, até 7 dias) · 404 · `HEAD` → 405 `metodo_nao_permitido` com `Allow: GET`, sem gastar o uso único (Q31) |
+| POST /v1/privacidade/exclusao | senha | 202 · 400 `campos[senha].invalido` (senha errada; nunca 401) · 403 `exclusao_de_admin_so_pelo_painel` para conta com `admin` fora da sessão do painel com `admin` e `mfa`, antes da senha e sem gastar o freio (S113, decisão do dono de 2026-10-23) · 409 com aviso de pendências (CA-11) · 429 com `Retry-After` (freio por e-mail) · 401 `conta_indisponivel` (exceção registrada) |
+| GET /v1/admin/conta | — | 200 (rota de painel mínima, CA-08) · 403 sem `admin` ou sem `mfa` · 401 `conta_indisponivel` (exceção registrada) |
 Sessão = {tokenAcesso, expiraEm, emailVerificado (P1-dono), tokenRenovacao (fora do painel)}; respostas com `Cache-Control: no-store` (S17). Eventos (v1): ContaCriada, CadastroRepetidoTentado, VerificacaoReenviada, RecuperacaoSolicitada, SenhaRedefinida, ExportacaoSolicitada, ContaDesativada, ContaAnonimizada; payload só com ids.
 
 **Respostas do 2FA (P3 da revisão do grupo A)**, nas duas rotas com código, conferidas nesta ordem: (1) desafio inexistente, vencido (5 min), já usado, de outra etapa ou já com 5 falhas → 401 `nao_autenticado`, com o mesmo corpo para todos os motivos; (2) freio de segundo fator da conta ativo → 429 `limite_excedido` com `Retry-After`, sem gastar tentativa; (3) código errado: soma uma falha no desafio e no freio; se ainda sobra tentativa → 400 `validacao` com `campos: [{ campo, codigo: 'invalido', motivo }]` com `campo` = `codigo` ou `codigoRecuperacao` (o que veio); se era a quinta → 401 e o desafio morre. A `configuracao` só tem o (1). No painel (spec P1a e P1b): 400 fica na tela com o erro no campo; 401 volta a P1 com o e-mail preenchido e "O tempo para digitar o código acabou. Entre de novo."; 429 volta a P1 com o Banner genérico de P1 (CA-04). A diferença entre 400 e 401 só aparece para quem já passou da senha. A verificação de e-mail (etapa 8) continua com 400 também no limite, como diz a spec (A3).
 
-**Limites:** cadastro 10/h por IP; recuperação 3/h por e-mail; reenvio 3/h por conta (a rota não recebe e-mail); os dois 10/h por IP; aviso de cadastro repetido 1/h por e-mail (S15); código 5 tentativas; desafio de 2FA 5 tentativas (S1); exportação 1 por 24 h; login 100 em 15 min por IP (acima do freio de 50 falhas; conta também os acertos) e redefinição 20 em 15 min por IP (segura o custo do Argon2), valores fixados na etapa 16; o limite por IP é sempre conferido antes do limite por e-mail ou por conta (S109); contadores em memória, por instância (S24, S111). Freio do CA-04 (S14): 5 falhas em 15 min por e-mail (vale também para e-mail inexistente) e 50 em 15 min por IP (IPv6 agrupado por /64); a senha da exclusão e o código da redefinição entram no mesmo freio por e-mail.
+**Limites:** cadastro 10/h por IP; recuperação 3/h por e-mail; reenvio 3/h por conta (a rota não recebe e-mail); os dois 10/h por IP; aviso de cadastro repetido 1/h por e-mail (S15); código 5 tentativas; desafio de 2FA 5 tentativas (S1); exportação 1 por 24 h; login 100 em 15 min por IP (acima do freio de 50 falhas; conta também os acertos) e redefinição 20 em 15 min por IP (segura o custo do Argon2), valores fixados na etapa 16; ordem de conferência dos limites: conta, depois IP, depois e-mail (S109: o IP vem antes do e-mail, que o cliente escolhe livremente; a conta, que exige token válido, vem antes do IP desde a etapa 19 para não gastar a cota de um IP compartilhado atrás de CGNAT); contadores em memória, por instância (S24, S111). Freio do CA-04 (S14): 5 falhas em 15 min por e-mail (vale também para e-mail inexistente) e 50 em 15 min por IP (IPv6 agrupado por /64); a senha da exclusão e o código da redefinição entram no mesmo freio por e-mail.
 
 ## Etapas
 | # | Etapa | Arquivos | Verificação | Responsável | Grupo | Sensível | CAs |

@@ -4,8 +4,9 @@
 // 1. o JWT (HS256, `iss`/`aud` fixos, 15 min) pelo `EmissorDeJwt`;
 // 2. a conta do `sub` em `ativa` (S8): desativada, anonimizada ou apagada perde
 //    o acesso na hora, em qualquer rota;
-// 3. com `conferirSessao` (rotas de `/v1/admin`, S8), a sessão do `sid`: da
-//    mesma conta, não revogada (logout, redefinição, reuso) e não vencida.
+// 3. com `conferirSessao` (rotas de `/v1/admin`, S8, e com `@ConfereSessao()`,
+//    etapa 19), a sessão do `sid`: da mesma conta, não revogada (logout,
+//    redefinição, reuso) e não vencida.
 // Os perfis devolvidos são os do token que a conta ainda tem: perfil retirado
 // some já na próxima requisição, e `admin` continua só onde o token o trouxe
 // (sessão do painel com segundo fator, S1).

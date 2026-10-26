@@ -98,6 +98,25 @@ O script `pnpm --filter api migrar` faz os dois passos na ordem do deploy (é o 
 
 Conferir a API: `curl http://localhost:3000/v1/saude` e `curl http://localhost:3000/v1/saude/pronto` (este consulta o banco).
 
+## Autenticação
+
+Conta única por e-mail, com os perfis `consumidor`, `lojista` e `admin`. O mesmo login vale nos dois apps; o painel só abre para `admin` com segundo fator (TOTP). A API é a autoridade: valida cada corpo, revoga sessão no servidor e nunca confia no perfil que o cliente diz ter. Decisão completa em `docs/adr/0012-sessao-e-autenticacao.md`; rotas, fluxos, eventos, limites e prazos de retenção em `apps/api/src/modulos/identidade/README.md`.
+
+- **Token de acesso:** JWT de 15 minutos. Nos apps vai em `Authorization: Bearer`; no painel fica só em memória.
+- **Renovação:** token opaco rotativo, guardado no servidor só como HMAC. Nos apps dura 30 dias deslizantes e vai no corpo; no painel vai em cookie `HttpOnly; Secure; SameSite=Strict` (`bairrin_renovacao`), com 30 minutos de inatividade e 12 horas no máximo, conferidos no servidor. Logout e troca de senha revogam a sessão no servidor na hora: a renovação deixa de valer, e o token de acesso já emitido cai na hora em `/v1/admin` e nas rotas com `@ConfereSessao()` (dados da conta e cópia dos dados); nas demais, ele vale até completar os 15 minutos. A exclusão da conta também revoga as sessões e desativa a conta, e o token de acesso cai na hora em qualquer rota.
+- **Admin:** senha e depois código do app autenticador (TOTP). A conta admin só pede a própria exclusão pelo painel, com o segundo fator (S113). Quem ainda não tem 2FA o configura antes de qualquer outra coisa, no próprio painel. Quem perde o celular e os códigos de recuperação usa a CLI de reconfiguração (`pnpm --filter api reconfigurar-segundo-fator`).
+- **API e painel:** `packages/cliente-api/README.md` (renovação em 401, fila única, revogação pendente) e `apps/painel/README.md` (telas de entrada, inatividade e várias abas).
+- **Apps Expo:** guardam a sessão no SecureStore e limpam tudo no logout; essa parte fica em `packages/mobile-base/README.md`, que **ainda não existe** e vem na trilha mobile (plano 01b, etapa 20b).
+
+Para ter um admin em desenvolvimento, com o banco migrado, o `seed` rodado (grava os termos e a política que o cadastro exige) e a API e o worker no ar:
+
+```bash
+pnpm --filter api seed
+pnpm --filter api seed:admin
+```
+
+O `seed:admin` pergunta e-mail (duas vezes), nome e celular e cria a conta sem senha. O código para definir a senha chega pelo worker ao Mailpit (`http://127.0.0.1:8025`): use o link "Esqueci minha senha" da tela de entrada do painel (abre a tela "Recuperar senha"), entre e configure o app autenticador. Sem o worker rodando, nenhum e-mail (verificação, recuperação, aviso) é enviado.
+
 ## Verificação
 
 Rode na raiz, nesta ordem (é a do CI de PR):
@@ -148,4 +167,4 @@ Nenhum serviço pago é contratado até o app ficar pronto (decisão do dono), e
 
 - `docs/adr/README.md`: índice das decisões de arquitetura.
 - `docs/CONVENCOES.md`: nomes, camadas, commits, testes e logs.
-- Um README em cada app e pacote.
+- Um README em cada app, pacote e módulo da API (o de Identidade: `apps/api/src/modulos/identidade/README.md`).

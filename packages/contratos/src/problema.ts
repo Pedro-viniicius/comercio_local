@@ -50,7 +50,21 @@ export const ERROS = {
   /** Login no painel com senha certa e conta sem perfil `admin` (01b, S23). */
   sem_acesso_painel: { status: 403, title: 'Esta conta não tem acesso ao painel' },
   nao_encontrado: { status: 404, title: 'Recurso não encontrado' },
+  /**
+   * Método recusado num caminho que existe, com `Allow` (01b, Q31: o `HEAD` do
+   * download da cópia dos dados, que não pode gastar o uso único).
+   */
+  metodo_nao_permitido: { status: 405, title: 'Método não permitido neste endereço' },
   conflito: { status: 409, title: 'Conflito com o estado atual do recurso' },
+  /**
+   * Exclusão da conta com perfil `admin` pedida fora da sessão do painel com
+   * segundo fator (01b, S113). O `title` orienta a usar o painel.
+   */
+  exclusao_de_admin_so_pelo_painel: {
+    status: 403,
+    title:
+      'A conta de administrador só pode ser excluída pelo painel, depois de entrar com o segundo fator',
+  },
   /** Exclusão de conta com pedido em andamento ou valor a receber (01b, CA-11). */
   exclusao_com_pendencias: {
     status: 409,

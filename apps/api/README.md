@@ -2,7 +2,7 @@
 
 API do Bairrin em NestJS 12 (Node 22, ESM), com Prisma 7 sobre PostgreSQL. São dois processos do mesmo código: o HTTP (`src/main.ts`) e o worker (`src/worker.ts`, relay da outbox, assinantes e tarefas agendadas). Decisões: ADR-003, 004, 010 e 011.
 
-Além do núcleo (`src/compartilhado`), existe o primeiro módulo de negócio, `src/modulos/identidade` (plano 01b), ainda parcial: domínio, portas e eventos de aplicação, e em `http/` só a lista pública de senhas comuns. Os adaptadores (`infra`), os casos de uso e as rotas chegam nas próximas etapas do plano. Os fakes dos testes de unidade ficam em `test/fakes/` (veja "Identidade" abaixo).
+Além do núcleo (`src/compartilhado`), existe o primeiro módulo de negócio, `src/modulos/identidade` (plano 01b): contas, sessão, segundo fator do admin, recuperação de senha e privacidade, com domínio, casos de uso, repositórios Prisma, assinantes de eventos, tarefas diárias e as rotas HTTP. Rotas, fluxos, eventos, limites e prazos de retenção estão em `src/modulos/identidade/README.md`; a decisão de sessão, em `docs/adr/0012-sessao-e-autenticacao.md`. Os fakes dos testes de unidade ficam em `test/fakes/` (veja "Identidade" abaixo).
 
 ## Rodar
 
@@ -16,6 +16,8 @@ pnpm --filter api worker    # worker; precisa do banco migrado e do pg-boss migr
 Dados de exemplo: `pnpm --filter api seed`, com o banco migrado. Grava a versão 1.0 dos Termos de Uso e da Política de Privacidade, marcadas "RASCUNHO, revisar com advogado", como o dono dos schemas (`DATABASE_URL_MIGRACAO`), porque a aplicação só lê documentos legais. Só roda com `NODE_ENV=development` ou `test` (recusa `production` e ambiente sem `NODE_ENV`); rodar de novo não muda o que já foi gravado.
 
 Conta admin: `pnpm --filter api seed:admin` (`src/cli/seed-admin.ts`) cria a conta admin sem senha; é o único caminho que concede `admin` (nenhuma rota concede) e, ao contrário do `seed`, roda em produção, na máquina da API. Lê da entrada padrão, uma linha cada, o e-mail, o e-mail de novo, o nome e o celular (nada pessoal por argumento); depois do primeiro admin, exige `--operador <id da sua conta admin>`, gravado na auditoria. Sobe o mesmo `AppModule` da API, sem HTTP. O código para definir a senha vai para o e-mail da conta; no primeiro login no painel, ela configura o app autenticador.
+
+Reconfigurar o segundo fator de um admin que perdeu o celular e os códigos de recuperação: `pnpm --filter api reconfigurar-segundo-fator --operador <id da sua conta admin> [--conta <id da conta>]` (`src/cli/reconfigurar-segundo-fator.ts`). Sem `--conta`, o e-mail da conta é lido da entrada padrão, nunca de argumento. Apaga o segundo fator, os códigos de recuperação e a senha, revoga todas as sessões da conta, pede a recuperação de senha pelo e-mail e grava a auditoria com o operador como ator. Em produção roda na máquina da API, como o `seed:admin`.
 
 Os dois compilam com `tsc` e rodam `node dist/...` com `--env-file-if-exists=.env`. Rodar direto o TypeScript (por exemplo com `tsx`) **não funciona**: o `tsx` não emite os metadados de decorator e a injeção de dependência do Nest quebra.
 
@@ -128,7 +130,8 @@ modulos/identidade/
   aplicacao/     casos de uso, assinantes, tarefas diárias, eventos e portas de serviço
                  (hasher, cifrador, JWT, TOTP...)
   infra/         repositórios Prisma, cripto, modelos de e-mail e o VerificadorDeAcesso
-  http/          controllers (contas, sessões, senha, segundo fator), cookie do painel
+  http/          controllers (contas, conta, sessões, senha, segundo fator, privacidade e a rota
+                 mínima do painel `admin-conta`), cookie do painel
                  (sessao-no-http.ts), limites das rotas (limites.ts) e a lista pública de senhas
                  comuns (senha-fora-da-lista-publica.ts, dados/senhas-comuns-publicas.ts)
   identidade.module.ts, index.ts   módulo Nest e a API pública do módulo
@@ -164,8 +167,8 @@ test/fakes/identidade/      repositórios em memória (criarIdentidadeEmMemoria)
 
 - Erro em Problem Details (`application/problem+json`): `type`, `title`, `status`, `codigo`, `campos[{campo, codigo, motivo}]` (no máximo 20 itens; num objeto, os campos declarados vêm antes das chaves desconhecidas) e `idRequisicao`. Erro inesperado vira 500 genérico, sem pilha nem mensagem.
 - `X-Request-Id` gerado sempre no servidor. `Cache-Control: no-store` por padrão. Helmet. CORS por lista de origens, com credenciais.
-- Corpo JSON até 100 KB (413 acima). Limite global de 300 requisições por minuto por IP, em memória (uma instância). Rotas sensíveis têm limites próprios por IP, por conta ou por e-mail (`@LimitarRota`, valores em `modulos/identidade/http/limites.ts`), conferidos antes da validação do corpo, sempre os por IP primeiro (um IP bloqueado não gasta o contador de nenhum e-mail); IPv6 conta pelo /64. Excesso: 429 com `Retry-After`.
-- Autenticação: toda rota exige `Authorization: Bearer <token de acesso>`, menos as marcadas com `@Publico()` (guarda global `Autenticado`); em `/v1/admin`, `@Publico()` é ignorado. Só a guarda responde 401 nas rotas autenticadas. Em `/v1/admin`, a conta precisa de `admin` com segundo fator e a sessão do token é conferida a cada requisição; sem isso, 403 com log só do id da conta. Use `@Perfis('admin')` e `@ExigeMfa()` nos controllers de admin.
+- Corpo JSON até 100 KB (413 acima). Limite global de 300 requisições por minuto por IP, em memória (uma instância). Rotas sensíveis têm limites próprios por IP, por conta ou por e-mail (`@LimitarRota`, valores em `modulos/identidade/http/limites.ts`), conferidos antes da validação do corpo, na ordem conta, IP e e-mail (a recusa por conta não gasta a cota do IP; um IP bloqueado não gasta o contador de nenhum e-mail); IPv6 conta pelo /64. Excesso: 429 com `Retry-After`.
+- Autenticação: toda rota exige `Authorization: Bearer <token de acesso>`, menos as marcadas com `@Publico()` (guarda global `Autenticado`); em `/v1/admin`, `@Publico()` é ignorado. Só a guarda responde 401 nas rotas autenticadas. Em `/v1/admin`, a conta precisa de `admin` com segundo fator e a sessão do token é conferida a cada requisição; sem isso, 403 com log só do id da conta. Use `@Perfis('admin')` e `@ExigeMfa()` nos controllers de admin. Fora do admin, só as rotas com `@ConfereSessao()` (`GET /v1/conta` e a cópia dos dados) conferem a sessão do `sid`; as demais conferem só `contas.status`, e o token de acesso vale até vencer (15 min) mesmo depois de logout. Use `@ConfereSessao()` em rota nova que entregue dado pessoal sem pedir a senha. Exceções registradas ao "só a guarda responde 401": `sessao_invalida` na verificação de e-mail e `conta_indisponivel` na exclusão, em `GET /v1/conta` e em `GET /v1/admin/conta`.
 - Painel: o token de renovação vai só no cookie `bairrin_renovacao` (`HttpOnly; Secure; SameSite=Strict`, `Path=/v1/sessoes/renovacao`). Renovação e logout pelo cookie exigem `X-Cliente: painel` e a origem do painel na lista do CORS.
 - `trust proxy` de 2 saltos só em produção, para o Fly; esse valor ainda precisa ser confirmado num Fly real.
 - Log em JSON, sem corpo de requisição, sem query na URL, com redator de chaves sensíveis. A mensagem de erro de biblioteca de banco não é registrada.

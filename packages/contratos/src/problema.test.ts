@@ -134,15 +134,24 @@ describe('Problema', () => {
   it.each([
     ['sem_acesso_painel', 403, 'Esta conta não tem acesso ao painel'],
     ['exclusao_com_pendencias', 409, 'A conta tem pendências que adiam a exclusão'],
-  ] as const)('o código %s do 01b sai com status %i (S23, CA-11, R28)', (codigo, status, title) => {
-    expect(criarProblema({ codigo, idRequisicao: 'req-3' })).toEqual({
-      type: `urn:bairrin:erro:${codigo}`,
-      title,
-      status,
-      codigo,
-      idRequisicao: 'req-3',
-    });
-  });
+    [
+      'exclusao_de_admin_so_pelo_painel',
+      403,
+      'A conta de administrador só pode ser excluída pelo painel, depois de entrar com o segundo fator',
+    ],
+    ['metodo_nao_permitido', 405, 'Método não permitido neste endereço'],
+  ] as const)(
+    'o código %s do 01b sai com status %i (S23, CA-11, R28, S113, Q31)',
+    (codigo, status, title) => {
+      expect(criarProblema({ codigo, idRequisicao: 'req-3' })).toEqual({
+        type: `urn:bairrin:erro:${codigo}`,
+        title,
+        status,
+        codigo,
+        idRequisicao: 'req-3',
+      });
+    },
+  );
 
   it('todo código tem status de erro e título', () => {
     for (const [codigo, { status, title }] of Object.entries(ERROS)) {

@@ -3,8 +3,9 @@ import { objetoEstrito, z } from '../zod.ts';
 import { codigoSchema, emailSchema, senhaNovaSchema } from './contas.ts';
 
 /**
- * `POST /v1/senha/recuperacao` (público). Resposta: 202 sem corpo, sempre,
- * exista ou não conta com o e-mail (CA-06). O código vale 30 min e uma vez.
+ * `POST /v1/senha/recuperacao` (público). Resposta: 202 sem corpo, a mesma
+ * exista ou não conta com o e-mail (CA-06); 429 com `Retry-After` nos limites
+ * da rota. O código vale 30 min e uma vez.
  */
 export const solicitarRecuperacaoSchema = objetoEstrito({ email: emailSchema });
 export type SolicitarRecuperacao = z.infer<typeof solicitarRecuperacaoSchema>;

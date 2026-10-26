@@ -22,6 +22,7 @@ import {
 import { Relogio, RelogioFixo } from '../../../src/compartilhado/tempo/relogio.ts';
 import { chaveDoFreioPorOrigem } from '../../../src/modulos/identidade/aplicacao/sessao/comum.ts';
 import { COOKIE_DE_RENOVACAO } from '../../../src/modulos/identidade/http/sessao-no-http.ts';
+import { criarCapturaDeLog } from '../../helpers/captura-de-log.ts';
 import { URL_APP_TESTE } from '../preparar-banco.ts';
 import { CHAVES, type Pilha, T0 } from './pilha-de-casos-de-uso.ts';
 
@@ -31,8 +32,7 @@ export const ORIGEM_DO_PAINEL = 'https://painel.bairrin.com.br';
  * Destino único do log no arquivo (o nestjs-pino cria o pino-http uma vez por processo):
  * cada `subirApi()` limpa as linhas.
  */
-const linhas: string[] = [];
-const destinoDoLog = { write: (linha: string) => void linhas.push(linha) };
+const captura = criarCapturaDeLog();
 
 export interface ApiDeTeste {
   readonly app: NestExpressApplication;
@@ -40,14 +40,23 @@ export interface ApiDeTeste {
   readonly relogio: RelogioFixo;
   /** As linhas do log desde a subida, juntas. */
   textoDoLog(): string;
+  /** As linhas do log desde a subida, como objetos. */
+  registrosDoLog(): Record<string, unknown>[];
   fechar(): Promise<void>;
 }
 
-/** Sobe a API com o relógio em `T0` (ou o dado). `controllers`: rotas extras só do teste. */
+/**
+ * Sobe a API com o relógio em `T0` (ou o dado). `controllers`: rotas extras só do teste;
+ * `antesDeIniciar`: o que o `main.ts` faria antes do `init` (ex.: o interceptador do Sentry).
+ */
 export async function subirApi(
-  opcoes: { relogio?: RelogioFixo; controllers?: Type[] } = {},
+  opcoes: {
+    relogio?: RelogioFixo;
+    controllers?: Type[];
+    antesDeIniciar?: (app: NestExpressApplication) => void;
+  } = {},
 ): Promise<ApiDeTeste> {
-  linhas.length = 0;
+  captura.limpar();
   const relogio = opcoes.relogio ?? new RelogioFixo(T0);
   const ambiente = carregarAmbiente({
     NODE_ENV: 'test',
@@ -60,7 +69,7 @@ export async function subirApi(
     LOG_NIVEL: 'info',
   });
   const modulo = await Test.createTestingModule({
-    imports: [AppModule.registrar({ ambiente, destinoDoLog })],
+    imports: [AppModule.registrar({ ambiente, destinoDoLog: captura.destino })],
     controllers: opcoes.controllers ?? [],
   })
     .overrideProvider(Relogio)
@@ -69,12 +78,14 @@ export async function subirApi(
   const app = modulo.createNestApplication<NestExpressApplication>(OPCOES_DA_APLICACAO);
   configurarAplicacao(app, ambiente);
   app.set('trust proxy', true);
+  opcoes.antesDeIniciar?.(app);
   await app.init();
   return {
     app,
     http: request(app.getHttpServer()),
     relogio,
-    textoDoLog: () => linhas.join('\n'),
+    textoDoLog: () => captura.texto(),
+    registrosDoLog: () => captura.registros(),
     fechar: () => app.close(),
   };
 }

@@ -328,6 +328,27 @@ describe('POST /v1/conta/verificacao-email/reenvio (CA-01)', () => {
     expect(tipos.filter((tipo) => tipo === 'identidade.VerificacaoReenviada')).toHaveLength(3);
   });
 
+  it('o limite por conta vem antes do por IP: a 4ª recusa da conta em diante não gasta a cota do IP (etapa 19, CGNAT)', async () => {
+    // Todas as contas atrás do mesmo IP (operadora com CGNAT): 10 por hora para o IP.
+    const ipDividido = ip();
+    const contas = await Promise.all([1, 2, 3, 4, 5].map(() => cadastrarEEntrar()));
+    const reenviar = (indice: number) =>
+      api.http
+        .post('/v1/conta/verificacao-email/reenvio')
+        .set('Authorization', `Bearer ${contas[indice]?.sessao.tokenAcesso ?? ''}`)
+        .set('X-Forwarded-For', ipDividido);
+
+    for (let vez = 0; vez < 3; vez += 1) await reenviar(0).expect(202);
+    // A conta insistente: sete recusas pelo limite dela (com o IP primeiro, teriam esgotado o IP).
+    for (let vez = 0; vez < 7; vez += 1) await reenviar(0).expect(429);
+    // O IP só contou os 3 aceitos: cabem mais 7 de outras contas.
+    for (const indice of [1, 1, 1, 2, 2, 2, 3]) await reenviar(indice).expect(202);
+    // Agora o IP chegou a 10: a conta 3 (no 2º pedido) e a 4 (no 1º) caem no limite do IP.
+    await reenviar(3).expect(429);
+    const peloIp = await reenviar(4).expect(429);
+    expect(peloIp.headers['retry-after']).toMatch(/^[1-9]\d*$/);
+  });
+
   it('corpo com campo → 400 `desconhecido`', async () => {
     const { sessao } = await cadastrarEEntrar();
     const resposta = await api.http

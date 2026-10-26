@@ -10,7 +10,10 @@
 //   `campos[codigo].invalido`; freio por e-mail ativo → 429 com `Retry-After`;
 //   `sessao_invalida` → 401 (exceção registrada ao "401 só da guarda": a
 //   sessão acabou entre a guarda e o caso de uso).
-// - `POST /v1/conta/verificacao-email/reenvio` (com sessão): 202 sempre.
+// - `POST /v1/conta/verificacao-email/reenvio` (com sessão): 202; 3 por hora
+//   por conta, conferido antes do limite de 10 por hora por IP (etapa 19): a
+//   recusa por conta não gasta a cota do IP, que atrás de CGNAT é dividida
+//   com outras pessoas.
 import { Body, Controller, HttpCode, Post, Res, UnauthorizedException } from '@nestjs/common';
 import {
   type CadastroAceito,
@@ -103,7 +106,7 @@ export class ContasController {
 
   @Post('conta/verificacao-email/reenvio')
   @HttpCode(202)
-  @LimitarRota(LIMITES_DA_IDENTIDADE.reenvioPorIp, LIMITES_DA_IDENTIDADE.reenvioPorConta)
+  @LimitarRota(LIMITES_DA_IDENTIDADE.reenvioPorConta, LIMITES_DA_IDENTIDADE.reenvioPorIp)
   async reenviar(
     @ContaAtual() conta: ContaAutenticada,
     @Body(new ValidacaoZodPipe(corpoVazioSchema)) _corpo: unknown,

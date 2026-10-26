@@ -1,4 +1,4 @@
-// Módulo Nest da Identidade (plano 01b, etapa 16): liga as portas da aplicação
+// Módulo Nest da Identidade (plano 01b, etapas 16 e 19): liga as portas da aplicação
 // e do domínio aos adaptadores (repositórios Prisma, cripto, modelos de
 // e-mail), registra os casos de uso, os controllers, os assinantes de eventos,
 // o anonimizador e as tarefas diárias, e fornece ao núcleo o
@@ -23,6 +23,7 @@ import { CriarAdminCasoDeUso } from './aplicacao/cadastro/criar-admin.caso-de-us
 import { CriarContaCasoDeUso } from './aplicacao/cadastro/criar-conta.caso-de-uso.ts';
 import { ReenviarVerificacaoCasoDeUso } from './aplicacao/cadastro/reenviar-verificacao.caso-de-uso.ts';
 import { VerificarEmailCasoDeUso } from './aplicacao/cadastro/verificar-email.caso-de-uso.ts';
+import { ConsultarContaCasoDeUso } from './aplicacao/conta/consultar-conta.caso-de-uso.ts';
 import { Cifrador } from './aplicacao/portas/cifrador.ts';
 import { EmissorDeJwt } from './aplicacao/portas/emissor-de-jwt.ts';
 import { GeradorDeSegredos } from './aplicacao/portas/gerador-de-segredos.ts';
@@ -62,7 +63,10 @@ import {
   RepositorioDeSessoes,
   RepositorioDeSolicitacoes,
 } from './dominio/repositorios.ts';
+import { AdminContaController } from './http/admin-conta.controller.ts';
+import { ContaController } from './http/conta.controller.ts';
 import { ContasController } from './http/contas.controller.ts';
+import { PrivacidadeController } from './http/privacidade.controller.ts';
 import { SegundoFatorController } from './http/segundo-fator.controller.ts';
 import { SenhaController } from './http/senha.controller.ts';
 import { SessoesController } from './http/sessoes.controller.ts';
@@ -120,7 +124,16 @@ const ASSINANTES = [
 ] as const;
 
 @Module({
-  controllers: [ContasController, SessoesController, SenhaController, SegundoFatorController],
+  controllers: [
+    ContasController,
+    SessoesController,
+    SenhaController,
+    SegundoFatorController,
+    // Conta, privacidade e a rota mínima do painel (etapa 19)
+    ContaController,
+    PrivacidadeController,
+    AdminContaController,
+  ],
   providers: [
     // Repositórios (etapa 7)
     { provide: RepositorioDeContas, useClass: RepositorioDeContasPrisma },
@@ -166,6 +179,7 @@ const ASSINANTES = [
     SolicitarExportacaoCasoDeUso,
     GerarExportacaoCasoDeUso,
     BaixarExportacaoCasoDeUso,
+    ConsultarContaCasoDeUso,
     // Anonimizador, assinantes e tarefas (etapas 11 e 13)
     AnonimizadorDeIdentidade,
     ...ASSINANTES,

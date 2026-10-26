@@ -30,8 +30,10 @@ export interface ContaAutenticada {
 export interface OpcoesDaVerificacao {
   /**
    * Confere também a sessão do `sid` (não revogada nem vencida). Vale para
-   * `/v1/admin` (S8): nas outras rotas, só `contas.status`, e o token de
-   * acesso de uma sessão encerrada segue valendo até o fim dos 15 min.
+   * `/v1/admin` (S8) e para as rotas com `@ConfereSessao()` (cópia dos dados,
+   * dados da conta; etapa 19): nas outras rotas, só `contas.status`, e o
+   * token de acesso de uma sessão encerrada segue valendo até o fim dos 15
+   * min.
    */
   readonly conferirSessao: boolean;
 }

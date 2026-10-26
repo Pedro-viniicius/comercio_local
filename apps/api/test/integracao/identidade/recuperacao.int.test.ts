@@ -1,8 +1,8 @@
 // Recuperação e redefinição de senha pela API inteira (plano 01b, etapa 16; CA-05, CA-06;
 // P1-dono, S14, S74, S82, S93), contra o Postgres de teste.
 //
-// - `POST /v1/senha/recuperacao`: 202 sempre, exista ou não a conta; 10 por hora por IP,
-//   conferido antes do de 3 por hora por e-mail (S109);
+// - `POST /v1/senha/recuperacao`: 202, exista ou não a conta, ou 429 com `Retry-After` nos
+//   limites: 10 por hora por IP, conferido antes do de 3 por hora por e-mail (S109);
 // - `POST /v1/senha/redefinicao`: 204 revoga todas as sessões (inclusive as de quem criou a
 //   conta antes com o e-mail de outra pessoa) e verifica o e-mail; código errado → 400; senha
 //   comum pela lista pública → 400; freio por e-mail → 429; o `ip` da requisição vai para o

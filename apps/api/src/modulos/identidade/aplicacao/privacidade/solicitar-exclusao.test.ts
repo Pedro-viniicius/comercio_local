@@ -454,4 +454,116 @@ describe('SolicitarExclusaoCasoDeUso', () => {
     expect(hasher.chamadas.verificar).toBe(1);
     expect(identidade.solicitacoes.todas()).toHaveLength(1);
   });
+
+  describe('conta com perfil admin (S113)', () => {
+    async function inserirAdmin(identidade: IdentidadeEmMemoria): Promise<void> {
+      const conta = Conta.criar({
+        id: CONTA,
+        nome: 'Ana Souza',
+        email: Email.criar(EMAIL),
+        telefone: Telefone.criar('35999991234'),
+        senhaHash: HasherFalso.hashDe(SENHA),
+        agora: AGORA,
+      });
+      conta.concederAdmin(AGORA);
+      await identidade.contas.inserir(conta);
+    }
+
+    it.each([
+      ['sem a sessão do painel com segundo fator', false],
+      ['sem dizer a sessão (falha fechada)', undefined],
+    ] as const)(
+      '%s: admin_fora_do_painel antes da senha, sem tocar no freio nem na conta',
+      async (_nome, sessaoDeAdminComMfa) => {
+        const cenario = montar();
+        const { identidade, caso, hasher } = cenario;
+        await inserirAdmin(identidade);
+        await abrirSessoes(identidade, CONTA, 'ana');
+
+        for (const senha of [SENHA, 'senha-errada']) {
+          await expect(
+            caso.executar({
+              contaId: CONTA,
+              senha,
+              ...(sessaoDeAdminComMfa === undefined ? {} : { sessaoDeAdminComMfa }),
+            }),
+          ).resolves.toEqual({ tipo: 'admin_fora_do_painel' });
+        }
+
+        expect(hasher.chamadas).toEqual({ gerarHash: 0, verificar: 0, simularVerificacao: 0 });
+        expect(freioDoEmail(cenario)).toBeUndefined();
+        expect(identidade.contas.dadosDe(CONTA)?.status).toBe('ativa');
+        expect(identidade.sessoes.todas().map((s) => s.revogadaEm)).toEqual([null, null, null]);
+        expect(identidade.solicitacoes.todas()).toEqual([]);
+        expect(identidade.publicador.publicados).toEqual([]);
+      },
+    );
+
+    it('na sessão do painel com segundo fator, segue o fluxo comum: senha errada soma uma falha e a certa desativa', async () => {
+      const cenario = montar();
+      const { identidade, caso } = cenario;
+      await inserirAdmin(identidade);
+
+      await expect(
+        caso.executar({ contaId: CONTA, senha: 'senha-errada', sessaoDeAdminComMfa: true }),
+      ).resolves.toEqual({ tipo: 'senha_incorreta' });
+      expect(freioDoEmail(cenario)?.falhas).toBe(1);
+
+      await expect(
+        caso.executar({ contaId: CONTA, senha: SENHA, sessaoDeAdminComMfa: true }),
+      ).resolves.toEqual({ tipo: 'desativada' });
+      expect(identidade.contas.dadosDe(CONTA)?.status).toBe('desativada');
+    });
+
+    it('com o freio já ativo, a recusa do admin vem antes dele: 403 e não 429; com segundo fator, o freio vale', async () => {
+      const cenario = montar();
+      const { identidade, caso, hasher } = cenario;
+      await inserirAdmin(identidade);
+      for (let i = 0; i < 5; i += 1) {
+        await expect(
+          caso.executar({ contaId: CONTA, senha: 'senha-errada', sessaoDeAdminComMfa: true }),
+        ).resolves.toEqual({ tipo: 'senha_incorreta' });
+      }
+      const falhasAntes = freioDoEmail(cenario)?.falhas;
+      const conferenciasAntes = hasher.chamadas.verificar;
+
+      await expect(
+        caso.executar({ contaId: CONTA, senha: SENHA, sessaoDeAdminComMfa: false }),
+      ).resolves.toEqual({ tipo: 'admin_fora_do_painel' });
+      expect(freioDoEmail(cenario)?.falhas).toBe(falhasAntes);
+      expect(hasher.chamadas.verificar).toBe(conferenciasAntes);
+
+      await expect(
+        caso.executar({ contaId: CONTA, senha: SENHA, sessaoDeAdminComMfa: true }),
+      ).resolves.toMatchObject({ tipo: 'freado' });
+      expect(hasher.chamadas.verificar).toBe(conferenciasAntes);
+    });
+
+    it('admin fora do painel, repetido muitas vezes, nunca soma falha nem confere senha', async () => {
+      const cenario = montar();
+      const { identidade, caso, hasher } = cenario;
+      await inserirAdmin(identidade);
+      for (let i = 0; i < 12; i += 1) {
+        await expect(
+          caso.executar({ contaId: CONTA, senha: 'senha-errada', sessaoDeAdminComMfa: false }),
+        ).resolves.toEqual({ tipo: 'admin_fora_do_painel' });
+      }
+      expect(hasher.chamadas.verificar).toBe(0);
+      expect(freioDoEmail(cenario)).toBeUndefined();
+      // A conta continua livre: no painel com segundo fator, a senha certa desativa.
+      await expect(
+        caso.executar({ contaId: CONTA, senha: SENHA, sessaoDeAdminComMfa: true }),
+      ).resolves.toEqual({ tipo: 'desativada' });
+    });
+
+    it('conta sem admin não depende da sessão: com ou sem segundo fator, a senha certa desativa', async () => {
+      for (const sessaoDeAdminComMfa of [false, true]) {
+        const { identidade, caso } = montar();
+        await inserirConta(identidade);
+        await expect(
+          caso.executar({ contaId: CONTA, senha: SENHA, sessaoDeAdminComMfa }),
+        ).resolves.toEqual({ tipo: 'desativada' });
+      }
+    });
+  });
 });
