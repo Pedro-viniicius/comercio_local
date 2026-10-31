@@ -38,7 +38,7 @@ export function CabecalhoDeMarca({
 }
 
 const estilos = StyleSheet.create({
-  cabecalho: { alignItems: 'center', gap: espaco[2] },
+  cabecalho: { alignSelf: 'stretch', alignItems: 'center', gap: espaco[2] },
   logo: { width: '60%', maxWidth: LARGURA_MAXIMA_DO_LOGO, aspectRatio: PROPORCAO_DO_LOGO },
   slogan: { ...estiloDeTexto('body'), textAlign: 'center', color: temaClaro.text.secondary },
 });

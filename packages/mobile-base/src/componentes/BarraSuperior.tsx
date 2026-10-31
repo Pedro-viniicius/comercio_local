@@ -4,7 +4,7 @@
 // um nó da tela (não há conjunto de ícones aprovado), sempre com rótulo acessível.
 import { espaco, raio, tamanho, temaClaro } from '@bairrin/tokens';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
 import { textos } from '../textos/pt-BR.ts';
 import { useFoco } from './acessibilidade.ts';
 import { anelDeFoco, estiloDeTexto, sombraDeElevacao } from './estilos.ts';
@@ -75,7 +75,9 @@ function BotaoDaBarra({
           importantForAccessibility="no-hide-descendants"
           style={estilos.selo}
         >
-          <Text style={estilos.seloTexto}>{textoDoSelo(selo)}</Text>
+          <Text maxFontSizeMultiplier={1.3} style={estilos.seloTexto}>
+            {textoDoSelo(selo)}
+          </Text>
         </View>
       ) : null}
     </Pressable>
@@ -89,6 +91,8 @@ export function BarraSuperior({
   elevada = false,
   testID,
 }: BarraSuperiorProps) {
+  // Com fonte muito ampliada o título ganha uma segunda linha em vez de perder o fim (WCAG 1.4.4).
+  const linhasDoTitulo = PixelRatio.getFontScale() > LIMITE_DE_FONTE_AMPLIADA ? 2 : 1;
   return (
     <View testID={testID} style={[estilos.barra, elevada && sombraDeElevacao(1)]}>
       {aoVoltar ? (
@@ -98,7 +102,7 @@ export function BarraSuperior({
       ) : null}
       <Text
         role="heading"
-        numberOfLines={1}
+        numberOfLines={linhasDoTitulo}
         ellipsizeMode="tail"
         style={[estilos.titulo, !aoVoltar && estilos.tituloSemVoltar]}
       >
@@ -117,6 +121,8 @@ export function BarraSuperior({
     </View>
   );
 }
+
+const LIMITE_DE_FONTE_AMPLIADA = 1.3;
 
 const estilos = StyleSheet.create({
   barra: {
@@ -149,7 +155,7 @@ const estilos = StyleSheet.create({
     top: espaco[1],
     right: espaco[1],
     minWidth: 20,
-    height: 20,
+    minHeight: 20,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: espaco[1],

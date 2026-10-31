@@ -24,6 +24,7 @@ const config: ExpoConfig = {
     adaptiveIcon: {
       foregroundImage: '../../assets/brand/png/icone-android-frente-1024.png',
       monochromeImage: '../../assets/brand/png/icone-android-mono-1024.png',
+      // = `blue.600` de @bairrin/tokens (o app.config.ts não importa o pacote compilado).
       backgroundColor: '#1F5BD1',
     },
     // O padrão do prebuild liga o Auto Backup do Google Drive: cache e fila offline iriam para fora

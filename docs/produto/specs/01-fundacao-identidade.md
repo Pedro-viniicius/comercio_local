@@ -257,7 +257,7 @@ Além dos já citados nas telas:
 - `apps/painel/src/autenticacao/*.tsx` (etapa 15).
 - `apps/consumidor/src/app/(conta)/*.tsx`, `apps/lojista/src/app/(conta)/*.tsx` (etapas 17 e 18).
 - Assets de marca: `assets/brand/bairrin-logo-horizontal.svg` (seção 2.7 da identidade).
-- Pendência (dev ou lead): o logo hoje vem de `apps/painel/src/autenticacao/bairrin-logo-horizontal.svg`; falta gravar o asset final em `assets/brand/bairrin-logo-horizontal.svg` e fazer o painel importar dele (ou do pacote de tokens).
+- Resolvido (R18, M2): o painel usa `apps/painel/src/autenticacao/bairrin-logo-horizontal.svg`, cópia byte a byte de `assets/brand/bairrin-logo-horizontal.svg` (197×66, exibido a 98×33), conferida por `logo.test.ts`; a cópia local evita importar de fora da raiz do Vite.
 - Pendência (plano 08, listagens longas): quando houver páginas com barra fixa ou tabelas, rever a posição do aviso de fim de sessão (hoje `position: sticky` em `.aut-aviso-fixo`, dentro do `main`).
 - Não tocar: `packages/mobile-base/src/sessao/**`, `packages/contratos/**`, `packages/cliente-api/**`, `apps/api/**`.
 

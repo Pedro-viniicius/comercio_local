@@ -1,6 +1,6 @@
 import { temaClaro } from '@bairrin/tokens';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo, Platform, Text } from 'react-native';
+import { AccessibilityInfo, PixelRatio, Platform, Text } from 'react-native';
 import { anelDeFocoSobreEscuro } from './estilos.ts';
 import {
   DURACAO_DO_TOAST_COM_ACAO_EM_MS,
@@ -16,7 +16,12 @@ const avancar = (ms: number) =>
     jest.advanceTimersByTime(ms);
   });
 
-beforeEach(() => jest.useFakeTimers());
+beforeEach(() => {
+  jest.useFakeTimers();
+  // Fonte e leitor de tela comuns; o Jest do React Native devolve escala 2 por padrão.
+  jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(1);
+  jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(false);
+});
 afterEach(() => {
   jest.useRealTimers();
   jest.restoreAllMocks();
@@ -46,6 +51,54 @@ describe('Toast', () => {
     await render(<Toast mensagem="Oi" aoDispensar={aoDispensar} />);
 
     await avancar(DURACAO_DO_TOAST_EM_MS - 1);
+    expect(aoDispensar).not.toHaveBeenCalled();
+    await avancar(1);
+    expect(aoDispensar).toHaveBeenCalledTimes(1);
+  });
+
+  it('com leitor de tela ligado a duração dobra (WCAG 2.2.1, D19)', async () => {
+    jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(true);
+    const aoDispensar = jest.fn();
+    await render(<Toast mensagem="Oi" aoDispensar={aoDispensar} />);
+
+    await avancar(DURACAO_DO_TOAST_EM_MS * 2 - 1);
+    expect(aoDispensar).not.toHaveBeenCalled();
+    await avancar(1);
+    expect(aoDispensar).toHaveBeenCalledTimes(1);
+  });
+
+  it('com leitor de tela ligado e ação "Desfazer", a duração é a dobra de 6 s: 12 s (D19)', async () => {
+    jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(true);
+    const aoDispensar = jest.fn();
+    await render(
+      <Toast
+        mensagem="Item removido"
+        acao={{ rotulo: 'Desfazer', aoPressionar: jest.fn() }}
+        aoDispensar={aoDispensar}
+      />,
+    );
+
+    await avancar(DURACAO_DO_TOAST_COM_ACAO_EM_MS * 2 - 1);
+    expect(aoDispensar).not.toHaveBeenCalled();
+    await avancar(1);
+    expect(aoDispensar).toHaveBeenCalledTimes(1);
+  });
+
+  it('fonte exatamente em 1,3 não dobra a duração (limite é "acima de")', async () => {
+    jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(1.3);
+    const aoDispensar = jest.fn();
+    await render(<Toast mensagem="Oi" aoDispensar={aoDispensar} />);
+
+    await avancar(DURACAO_DO_TOAST_EM_MS);
+    expect(aoDispensar).toHaveBeenCalledTimes(1);
+  });
+
+  it('com fonte do sistema ampliada (acima de 1,3) a duração dobra (D19)', async () => {
+    jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(2);
+    const aoDispensar = jest.fn();
+    await render(<Toast mensagem="Oi" aoDispensar={aoDispensar} />);
+
+    await avancar(DURACAO_DO_TOAST_EM_MS * 2 - 1);
     expect(aoDispensar).not.toHaveBeenCalled();
     await avancar(1);
     expect(aoDispensar).toHaveBeenCalledTimes(1);

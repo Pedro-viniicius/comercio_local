@@ -215,4 +215,12 @@ describe('CaixaDeSelecao', () => {
     await fireEvent(caixa(), 'blur');
     expect(caixa()).not.toHaveStyle({ outlineWidth: 2 });
   });
+
+  it('o check não cresce com a fonte do sistema: cabe no quadrado de 24 px a 200% (D11)', async () => {
+    await render(<Aceite />);
+    await fireEvent.press(screen.getByRole('checkbox'));
+
+    const marca = screen.getByText('✓', { includeHiddenElements: true });
+    expect(marca.props.allowFontScaling).toBe(false);
+  });
 });

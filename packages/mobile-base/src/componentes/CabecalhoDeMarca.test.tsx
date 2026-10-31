@@ -31,6 +31,12 @@ describe('CabecalhoDeMarca', () => {
     });
   });
 
+  it('o cabeçalho se estica na largura do pai, para os 60% do logo não colapsarem (D14)', async () => {
+    await render(<CabecalhoDeMarca testID="cabecalho" />);
+
+    expect(screen.getByTestId('cabecalho')).toHaveStyle({ alignSelf: 'stretch' });
+  });
+
   it('desenha o SVG da marca com SvgXml', async () => {
     await render(<CabecalhoDeMarca />);
 

@@ -1,4 +1,5 @@
-// Armazenamentos da sessão no SecureStore (plano 01b, etapa 12; CA-03, S18, S80).
+// Armazenamentos da sessão no SecureStore (plano 01b, etapa 12; CA-03, S18, S80, S127).
+import { MAXIMO_DE_REVOGACOES_PENDENTES } from '@bairrin/cliente-api';
 import type { Sessao } from '@bairrin/contratos';
 import {
   CHAVE_DA_REVOGACAO_PENDENTE,
@@ -129,28 +130,84 @@ describe('cofre da sessão no SecureStore', () => {
     }
   });
 
-  describe('primeira abertura depois de instalar (S18)', () => {
-    it('sem a marca, apaga as duas chaves antes de qualquer leitura e depois marca', async () => {
+  describe('primeira abertura depois de instalar (S18, S127)', () => {
+    it('sem a marca, o par e a pendência da instalação anterior viram uma revogação pendente, a sessão sai antes de qualquer uso, e depois marca (S127)', async () => {
       secureStoreFalso.itens.set(CHAVE_DA_SESSAO, JSON.stringify(SESSAO));
-      secureStoreFalso.itens.set(CHAVE_DA_REVOGACAO_PENDENTE, JSON.stringify({ tokenAcesso: 'x' }));
+      secureStoreFalso.itens.set(
+        CHAVE_DA_REVOGACAO_PENDENTE,
+        JSON.stringify({ tokenAcesso: 'acesso-de-um-logout-sem-rede' }),
+      );
       const marca = marcaFalsa(false);
       const { sessao, revogacaoPendente } = criarCofreDaSessao({ marca });
 
       expect(await sessao.ler()).toBeNull();
-      expect(await revogacaoPendente.ler()).toBeNull();
+      // Só os tokens: o par da sessão é o mais novo, e a pendência anterior vem depois.
+      expect(await revogacaoPendente.ler()).toEqual({
+        tokenAcesso: SESSAO.tokenAcesso,
+        tokenRenovacao: SESSAO.tokenRenovacao,
+        anteriores: [{ tokenAcesso: 'acesso-de-um-logout-sem-rede' }],
+      });
+      expect(secureStoreFalso.itens.has(CHAVE_DA_SESSAO)).toBe(false);
 
-      expect(
-        secureStoreFalso.chamadas
-          .slice(0, 2)
-          .map((c) => `${c.metodo}:${c.chave}`)
-          .sort(),
-      ).toEqual([`apagar:${CHAVE_DA_REVOGACAO_PENDENTE}`, `apagar:${CHAVE_DA_SESSAO}`]);
+      const preparo = secureStoreFalso.chamadas.slice(0, 4).map((c) => `${c.metodo}:${c.chave}`);
+      expect(preparo.slice(0, 2).sort()).toEqual([
+        `ler:${CHAVE_DA_REVOGACAO_PENDENTE}`,
+        `ler:${CHAVE_DA_SESSAO}`,
+      ]);
+      // A pendência é gravada antes de a sessão sair.
+      expect(preparo.slice(2)).toEqual([
+        `gravar:${CHAVE_DA_REVOGACAO_PENDENTE}`,
+        `apagar:${CHAVE_DA_SESSAO}`,
+      ]);
       for (const chamada of secureStoreFalso.chamadas) {
         expect(chamada.opcoes).toEqual({ keychainAccessible: WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       }
       expect(marca.marcar).toHaveBeenCalledTimes(1);
-      // Uma vez só por abertura.
-      expect(secureStoreFalso.chamadas.filter((c) => c.metodo === 'apagar')).toHaveLength(2);
+      // Uma vez só por abertura, e nada vai para a chave da sessão.
+      expect(secureStoreFalso.chamadas.filter((c) => c.metodo === 'apagar')).toHaveLength(1);
+      expect(
+        secureStoreFalso.chamadas.some((c) => c.metodo === 'gravar' && c.chave === CHAVE_DA_SESSAO),
+      ).toBe(false);
+    });
+
+    it('sem nada da instalação anterior, apaga as duas chaves (um valor quebrado não fica)', async () => {
+      secureStoreFalso.itens.set(CHAVE_DA_SESSAO, '{quebrado');
+      secureStoreFalso.itens.set(CHAVE_DA_REVOGACAO_PENDENTE, JSON.stringify({ outro: 1 }));
+      const { sessao, revogacaoPendente } = criarCofreDaSessao({ marca: marcaFalsa(false) });
+
+      expect(await sessao.ler()).toBeNull();
+      expect(await revogacaoPendente.ler()).toBeNull();
+      expect(secureStoreFalso.itens.size).toBe(0);
+      expect(secureStoreFalso.chamadas.some((c) => c.metodo === 'gravar')).toBe(false);
+    });
+
+    it('a revogação da instalação anterior não repete par e guarda no máximo MAXIMO_DE_REVOGACOES_PENDENTES', async () => {
+      const par = (n: number) => ({ tokenAcesso: `acesso-${n}`, tokenRenovacao: `renovacao-${n}` });
+      secureStoreFalso.itens.set(CHAVE_DA_SESSAO, JSON.stringify({ ...SESSAO, ...par(0) }));
+      secureStoreFalso.itens.set(
+        CHAVE_DA_REVOGACAO_PENDENTE,
+        JSON.stringify({
+          ...par(0),
+          anteriores: [par(1), 'texto', { tokenAcesso: 7 }, par(1), par(2), par(3), par(4), par(5)],
+        }),
+      );
+      const { revogacaoPendente } = criarCofreDaSessao({ marca: marcaFalsa(false) });
+
+      expect(MAXIMO_DE_REVOGACOES_PENDENTES).toBe(5);
+      expect(await revogacaoPendente.ler()).toEqual({
+        ...par(0),
+        anteriores: [par(1), par(2), par(3), par(4)],
+      });
+    });
+
+    it('sem conseguir ler a sessão antiga, ela não é revogada, mas a chave sai mesmo assim', async () => {
+      secureStoreFalso.itens.set(CHAVE_DA_SESSAO, JSON.stringify(SESSAO));
+      secureStoreFalso.itens.set(CHAVE_DA_REVOGACAO_PENDENTE, JSON.stringify({ tokenAcesso: 'x' }));
+      secureStoreFalso.falhas.add(`ler:${CHAVE_DA_SESSAO}`);
+      const { revogacaoPendente } = criarCofreDaSessao({ marca: marcaFalsa(false) });
+
+      expect(await revogacaoPendente.ler()).toEqual({ tokenAcesso: 'x' });
+      expect(secureStoreFalso.itens.has(CHAVE_DA_SESSAO)).toBe(false);
     });
 
     it('com a marca, não apaga nada: a sessão da instalação atual continua', async () => {
@@ -174,6 +231,8 @@ describe('cofre da sessão no SecureStore', () => {
 
       expect(await sessao.ler()).toEqual(SESSAO);
       expect(secureStoreFalso.chamadas.map((c) => c.metodo)).toEqual([
+        'ler',
+        'ler',
         'apagar',
         'apagar',
         'gravar',
@@ -185,18 +244,21 @@ describe('cofre da sessão no SecureStore', () => {
       secureStoreFalso.itens.set(CHAVE_DA_SESSAO, JSON.stringify(SESSAO));
       secureStoreFalso.falhas.add(`apagar:${CHAVE_DA_SESSAO}`);
       const marca = marcaFalsa(false);
-      const { sessao } = criarCofreDaSessao({ marca });
+      const { sessao, revogacaoPendente } = criarCofreDaSessao({ marca });
 
       await expect(sessao.ler()).rejects.toThrow(
         'Não foi possível apagar no armazenamento seguro.',
       );
       expect(marca.marcar).not.toHaveBeenCalled();
-      // A sessão da instalação anterior nunca foi lida.
-      expect(secureStoreFalso.chamadas.some((c) => c.metodo === 'ler')).toBe(false);
 
       secureStoreFalso.falhas.clear();
+      // A sessão da instalação anterior nunca é entregue, e o par entra na pendência uma vez só.
       expect(await sessao.ler()).toBeNull();
       expect(marca.marcar).toHaveBeenCalledTimes(1);
+      expect(await revogacaoPendente.ler()).toEqual({
+        tokenAcesso: SESSAO.tokenAcesso,
+        tokenRenovacao: SESSAO.tokenRenovacao,
+      });
     });
 
     it('sem conseguir ler a marca, trata como instalação nova e avisa só a origem', async () => {

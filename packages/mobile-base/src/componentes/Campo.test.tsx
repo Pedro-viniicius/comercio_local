@@ -29,6 +29,8 @@ function Controlado({ inicial = '', aoMudarTexto, ...resto }: Parcial) {
   );
 }
 
+afterEach(() => jest.restoreAllMocks());
+
 describe('Campo', () => {
   it('mostra o rótulo acima, mostra o valor e avisa as mudanças', async () => {
     const aoMudarTexto = jest.fn();
@@ -108,7 +110,64 @@ describe('Campo', () => {
     });
   });
 
+  describe('limite, foco automático e rótulo tocável', () => {
+    it('repassa `maxLength` e `autoFocus` ao campo de texto (D16)', async () => {
+      await render(<Controlado maxLength={80} autoFocus />);
+      const entrada = screen.getByLabelText('E-mail');
+      expect(entrada.props.maxLength).toBe(80);
+      expect(entrada.props.autoFocus).toBe(true);
+    });
+
+    it('a ref da tela como função recebe a entrada, e o rótulo continua levando o foco (D17)', async () => {
+      const recebidas: (TextInputInstance | null)[] = [];
+      await render(<Controlado ref={(entrada) => void recebidas.push(entrada)} />);
+      const entrada = recebidas.at(-1);
+      expect(entrada).not.toBeNull();
+      const foco = jest.spyOn(entrada as TextInputInstance, 'focus');
+      // O `focus` do mock do React Native é um `jest.fn` compartilhado entre os testes.
+      foco.mockClear();
+
+      await fireEvent.press(screen.getByText('E-mail', { includeHiddenElements: true }));
+      expect(foco).toHaveBeenCalledTimes(1);
+    });
+
+    it('o rótulo continua fora da árvore de acessibilidade e o campo mantém o nome acessível (D17)', async () => {
+      await render(<Controlado />);
+      expect(screen.queryByText('E-mail')).toBeNull();
+      expect(screen.getByLabelText('E-mail')).toBeOnTheScreen();
+    });
+
+    it('tocar no rótulo visível leva o foco ao campo e a ref da tela continua valendo (D17)', async () => {
+      const ref = createRef<TextInputInstance>();
+      await render(<Controlado ref={ref} />);
+      const foco = jest.spyOn(ref.current as TextInputInstance, 'focus');
+      foco.mockClear();
+
+      await fireEvent.press(screen.getByText('E-mail', { includeHiddenElements: true }));
+      expect(foco).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('senha', () => {
+    it('com a senha visível no Android usa `visible-password` (S129); no iOS, não', async () => {
+      jest.replaceProperty(Platform, 'OS', 'android');
+      await render(<Controlado rotulo="Senha" tipo="senha" inicial="segredo123" />);
+      expect(screen.getByLabelText('Senha').props.keyboardType).toBeUndefined();
+
+      await fireEvent.press(screen.getByRole('button', { name: 'Mostrar senha' }));
+      expect(screen.getByLabelText('Senha').props.keyboardType).toBe('visible-password');
+
+      await fireEvent.press(screen.getByRole('button', { name: 'Ocultar senha' }));
+      expect(screen.getByLabelText('Senha').props.keyboardType).toBeUndefined();
+    });
+
+    it('no iOS a senha visível não muda o teclado', async () => {
+      jest.replaceProperty(Platform, 'OS', 'ios');
+      await render(<Controlado rotulo="Senha" tipo="senha" inicial="segredo123" />);
+      await fireEvent.press(screen.getByRole('button', { name: 'Mostrar senha' }));
+      expect(screen.getByLabelText('Senha').props.keyboardType).toBeUndefined();
+    });
+
     it('começa oculta; "Mostrar senha" revela e vira "Ocultar senha", anunciando o estado', async () => {
       await render(<Controlado rotulo="Senha" tipo="senha" inicial="segredo123" />);
       expect(screen.getByLabelText('Senha').props.secureTextEntry).toBe(true);

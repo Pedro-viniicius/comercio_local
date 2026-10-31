@@ -24,6 +24,8 @@ import {
 
 export interface ValorDaSessao extends SituacaoDaSessao {
   entrar: SessaoDoApp['entrar'];
+  /** Depois de verificar o e-mail (etapa 14): troca o par sem limpar os dados (R9). */
+  substituirSessao: SessaoDoApp['substituirSessao'];
   sair: SessaoDoApp['sair'];
   requisitar: SessaoDoApp['requisitar'];
 }
@@ -49,6 +51,7 @@ export function ProvedorDeSessao({ children, ...opcoes }: PropriedadesDoProvedor
     () => ({
       ...situacao,
       entrar: sessaoDoApp.entrar,
+      substituirSessao: sessaoDoApp.substituirSessao,
       sair: sessaoDoApp.sair,
       requisitar: sessaoDoApp.requisitar,
     }),

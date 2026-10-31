@@ -7,7 +7,7 @@ import {
   solicitarExclusaoSchema,
   verificarEmailSchema,
 } from '@bairrin/contratos';
-import { mensagemDoCampo } from './mensagem-do-campo.ts';
+import { mensagemDoCampo, type TelaComTextoProprio } from './mensagem-do-campo.ts';
 import { textos } from './pt-BR.ts';
 
 describe('mensagemDoCampo', () => {
@@ -117,7 +117,9 @@ describe('mensagemDoCampo com tela', () => {
   it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty', '', 'entrar'])(
     'tela "%s" que não existe cai no texto geral, sem achar propriedade herdada',
     (tela) => {
-      expect(mensagemDoCampo('codigo', 'invalido', 'm', tela)).toBe(textos.erro.codigo.invalido);
+      // O tipo recusa esses nomes; a conversão simula um valor que chega sem o tipo (JS).
+      const semTipo = tela as TelaComTextoProprio;
+      expect(mensagemDoCampo('codigo', 'invalido', 'm', semTipo)).toBe(textos.erro.codigo.invalido);
     },
   );
 
@@ -166,7 +168,7 @@ describe('textos.erro', () => {
 // O que a API e a validação local realmente produzem, passado pela função (CA-13).
 describe('mensagemDoCampo com os contratos de identidade', () => {
   type ErroDoZod = Parameters<typeof camposDoErroZod>[0];
-  const textosDe = (resultado: { error?: ErroDoZod }, tela?: string) => {
+  const textosDe = (resultado: { error?: ErroDoZod }, tela?: TelaComTextoProprio) => {
     if (!resultado.error) throw new Error('o esquema deveria recusar o corpo');
     return camposDoErroZod(resultado.error).map(({ campo, codigo, motivo }) => ({
       campo,

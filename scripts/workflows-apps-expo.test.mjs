@@ -30,11 +30,14 @@ describe('workflows dos apps Expo, sem atalho', () => {
       const codigo = semComentarios(lerWorkflow(nome));
 
       it('não pula passo por existência de arquivo nem por saída de passo anterior', () => {
-        assert.doesNotMatch(codigo, /hashFiles\(/);
+        // `hashFiles` só na chave de um cache (R19), onde não decide se um passo roda.
+        for (const linha of codigo.split('\n').filter((l) => /hashFiles/.test(l))) {
+          assert.match(linha, /^\s+key:\s/, `hashFiles fora da chave do cache: ${linha.trim()}`);
+        }
         assert.doesNotMatch(codigo, /steps\.[\w-]+\.outputs/);
         assert.doesNotMatch(codigo, /GITHUB_OUTPUT/);
         assert.doesNotMatch(codigo, /::notice::/);
-        assert.doesNotMatch(codigo, /hashFiles|existe\s*==|pulado/);
+        assert.doesNotMatch(codigo, /existe\s*==|pulado/);
       });
 
       it('não aceita falha de passo nem engole o código de saída', () => {
@@ -118,6 +121,17 @@ describe('workflows dos apps Expo, sem atalho', () => {
           );
         }
       }
+    });
+
+    it('o cache do Gradle vem do actions/cache, depois do prebuild e antes do Gradle, com chave por app (R19)', () => {
+      const passos = codigo.split(/^\s+- name:/m).slice(1);
+      const indice = (padrao) => passos.findIndex((passo) => padrao.test(passo));
+      const cache = indice(/actions\/cache@[0-9a-f]{40}\b/);
+      assert.ok(cache >= 0, 'passo actions/cache (fixado pelo SHA) não encontrado');
+      assert.ok(cache > indice(/expo prebuild/), 'cache do Gradle antes do prebuild');
+      assert.ok(cache < indice(/gradlew assembleRelease/), 'cache do Gradle depois do Gradle');
+      assert.match(passos[cache], /~\/\.gradle\/caches/);
+      assert.match(passos[cache], /key:.*matrix\.app.*hashFiles\(/);
     });
 
     it('a matriz não interrompe os outros apps, mas cada app falha por si', () => {

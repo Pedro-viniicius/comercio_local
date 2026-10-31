@@ -1,0 +1,3 @@
+- [Kickoff do marketplace de comércio local](kickoff-marketplace-comercio-local.md) — produto pulado, CAs globais, git sem commit, Fase 4 do 01a por grupos
+- [Contexto do dono e cidade piloto](dono-contexto-piloto.md) — São Sebastião do Paraíso (MG), sem CNPJ, nome Bairrin, comissão 3%+taxa, retirada na loja, 24 h/7 dias, telefone obrigatório
+- [Explicar termos técnicos](feedback-explicar-termos.md) — todo termo técnico com o significado entre parênteses, objetivo

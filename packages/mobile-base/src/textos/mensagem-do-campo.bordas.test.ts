@@ -12,7 +12,7 @@ import {
   verificarEmailSchema,
   z,
 } from '@bairrin/contratos';
-import { mensagemDoCampo } from './mensagem-do-campo.ts';
+import { mensagemDoCampo, type TelaComTextoProprio } from './mensagem-do-campo.ts';
 import { textos } from './pt-BR.ts';
 
 interface Esquema {
@@ -21,7 +21,7 @@ interface Esquema {
 
 const SEGREDO = 'Segredo-Digitado-Pela-Pessoa-91827';
 
-const ESQUEMAS: ReadonlyArray<readonly [string, Esquema, string | undefined]> = [
+const ESQUEMAS: ReadonlyArray<readonly [string, Esquema, TelaComTextoProprio | undefined]> = [
   ['criarConta', criarContaSchema, 'cadastro'],
   ['entrar', entrarSchema, undefined],
   ['verificarEmail', verificarEmailSchema, undefined],

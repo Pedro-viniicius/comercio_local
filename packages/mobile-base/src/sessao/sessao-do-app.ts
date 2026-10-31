@@ -65,6 +65,12 @@ export interface CredenciaisDeEntrada {
 }
 
 /**
+ * Requisição autenticada que devolve uma sessão nova da mesma conta: hoje, a verificação do
+ * e-mail (`POST /v1/conta/verificacao-email`). O esquema da resposta é sempre o da sessão.
+ */
+export type PedidoDeSessaoSubstituta = Omit<OpcoesDeRequisicaoAutenticada<Sessao>, 'esquema'>;
+
+/**
  * A fila offline da conta anterior não foi apagada: a conta nova não entra, para não enviar
  * operações da outra conta. A mensagem é fixa.
  */
@@ -101,9 +107,20 @@ export interface SessaoDoApp {
   iniciar: () => Promise<void>;
   /**
    * Login. Com outra sessão aberta (troca de conta), encerra a anterior antes de guardar a nova.
-   * Rejeita com o erro da API (`ErroDeApi`, `ErroSemConexao`...) ou `ErroAoLimparDadosDaConta`.
+   * Rejeita com o erro da API (`ErroDeApi`, `ErroSemConexao`...) ou `ErroAoLimparDadosDaConta`;
+   * neste caso, a sessão recebida é revogada (ou fica como revogação pendente), nenhuma fica no
+   * aparelho e o estado vai para `sem_sessao` (R8).
    */
   entrar: (credenciais: CredenciaisDeEntrada) => Promise<void>;
+  /**
+   * Faz a requisição que devolve uma sessão nova da mesma conta e troca o par guardado, sem limpar
+   * os dados da conta (R9): depois de verificar o e-mail, a API marca a sessão anterior como
+   * `substituida`, e a próxima renovação com o par antigo seria recusada. O token não passa pela
+   * tela. Se a sessão foi encerrada ou trocada enquanto a requisição corria, a sessão recebida
+   * não entra: é revogada quando não há outra em uso. Rejeita com o erro da requisição (código
+   * errado: `ErroDeApi` 400).
+   */
+  substituirSessao: (pedido: PedidoDeSessaoSubstituta) => Promise<void>;
   /** Logout (CA-05). Rejeita só se o SecureStore não apagou a sessão. */
   sair: () => Promise<ResultadoDoLogout>;
   /** Requisição com o Bearer da sessão e a renovação em 401 do cliente autenticado. */
@@ -228,6 +245,26 @@ export function criarSessaoDoApp(opcoes: OpcoesDaSessaoDoApp): SessaoDoApp {
     definirSessao(resultado);
   }
 
+  /**
+   * Revoga no servidor uma sessão recebida que não vai ficar no aparelho (R8, R9). O cliente
+   * autenticado só revoga a sessão em uso: ela entra e sai em seguida, e o `encerrarSessao()` guarda
+   * o par como revogação pendente antes do DELETE, que se repete na próxima abertura se faltar rede
+   * (S80). Só chame sem outra sessão em uso. Não rejeita: as falhas viram só a origem.
+   */
+  async function revogarSemGuardar(sessao: Sessao): Promise<void> {
+    try {
+      await autenticado.iniciarSessao(sessao);
+    } catch {
+      // Em memória ela entrou; o `encerrarSessao()` abaixo a tira de lá e do SecureStore.
+      registrar('gravar_sessao');
+    }
+    try {
+      await autenticado.encerrarSessao();
+    } catch {
+      registrar('limpar_sessao');
+    }
+  }
+
   async function entrar({ email, senha }: CredenciaisDeEntrada): Promise<void> {
     const nova = await cliente.requisitar({
       metodo: 'POST',
@@ -236,6 +273,7 @@ export function criarSessaoDoApp(opcoes: OpcoesDaSessaoDoApp): SessaoDoApp {
       esquema: sessaoSchema,
     });
     versao += 1;
+    const versaoDoLogin = versao;
     let anterior: Sessao | null = null;
     try {
       anterior = await autenticado.obterSessao();
@@ -251,7 +289,13 @@ export function criarSessaoDoApp(opcoes: OpcoesDaSessaoDoApp): SessaoDoApp {
       }
     }
     const { fila } = await limparDadosDaConta();
-    if (!fila) throw new ErroAoLimparDadosDaConta();
+    if (!fila) {
+      // A conta nova não entra (não envia operação da anterior) nem fica viva no servidor sem
+      // ninguém com o token. A anterior, se havia, já foi encerrada: a tela volta ao login (R8).
+      await revogarSemGuardar(nova);
+      if (versao === versaoDoLogin) definirSessao(null);
+      throw new ErroAoLimparDadosDaConta();
+    }
     try {
       await autenticado.iniciarSessao(nova);
     } catch {
@@ -259,6 +303,34 @@ export function criarSessaoDoApp(opcoes: OpcoesDaSessaoDoApp): SessaoDoApp {
       registrar('gravar_sessao');
     }
     definirSessao(nova);
+  }
+
+  async function substituirSessao(pedido: PedidoDeSessaoSubstituta): Promise<void> {
+    const versaoDoPedido = versao;
+    const nova = await autenticado.requisitar({ ...pedido, esquema: sessaoSchema });
+    let atual: Sessao | null = null;
+    try {
+      atual = await autenticado.obterSessao();
+    } catch {
+      registrar('ler_sessao');
+    }
+    if (atual === null) {
+      // Logout ou expiração no meio: a sessão recebida não reabre a conta.
+      await revogarSemGuardar(nova);
+      return;
+    }
+    // Outra conta entrou no meio: a dela fica, e a recebida vence no servidor sem ninguém com o
+    // token (revogá-la pelo cliente tiraria a sessão em uso).
+    if (versao !== versaoDoPedido) return;
+    // Sem `await` entre a conferência acima e a troca: nada entra no meio.
+    const gravacao = autenticado.iniciarSessao(nova);
+    definirSessao(nova);
+    try {
+      await gravacao;
+    } catch {
+      // Como no login: vale em memória até o app fechar; a próxima abertura pede login.
+      registrar('gravar_sessao');
+    }
   }
 
   async function sair(): Promise<ResultadoDoLogout> {
@@ -289,6 +361,7 @@ export function criarSessaoDoApp(opcoes: OpcoesDaSessaoDoApp): SessaoDoApp {
       return inicio;
     },
     entrar,
+    substituirSessao,
     sair,
     requisitar: (opcoesDaRequisicao) => autenticado.requisitar(opcoesDaRequisicao),
   };

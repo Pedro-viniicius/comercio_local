@@ -4,8 +4,8 @@
 // as casas, sem texto visível; as casas só desenham o valor. Ao completar 6 dígitos chama
 // `aoCompletar` (a tela envia sozinha).
 import { espaco, raio, tamanho, temaClaro } from '@bairrin/tokens';
-import { useEffect, type Ref } from 'react';
-import { StyleSheet, Text, TextInput, View, type TextInputInstance } from 'react-native';
+import { useCallback, useEffect, useRef, type Ref } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View, type TextInputInstance } from 'react-native';
 import { textos } from '../textos/pt-BR.ts';
 import { anunciar, useFoco } from './acessibilidade.ts';
 import { estiloDeTexto } from './estilos.ts';
@@ -23,6 +23,8 @@ export interface CampoDeCodigoProps {
   erro?: string;
   ajuda?: string;
   desabilitado?: boolean;
+  /** Foco ao abrir a tela (A3 e A4 pedem o código de imediato). */
+  autoFocus?: boolean;
   ref?: Ref<TextInputInstance>;
   testID?: string;
 }
@@ -40,9 +42,19 @@ export function CampoDeCodigo({
   erro,
   ajuda,
   desabilitado = false,
+  autoFocus,
   ref,
   testID,
 }: CampoDeCodigoProps) {
+  const refDaEntrada = useRef<TextInputInstance | null>(null);
+  const refDoCampo = useCallback(
+    (entrada: TextInputInstance | null) => {
+      refDaEntrada.current = entrada;
+      if (typeof ref === 'function') ref(entrada);
+      else if (ref) ref.current = entrada;
+    },
+    [ref],
+  );
   const foco = useFoco();
   const digitos = digitosDoCodigo(valor);
   const casaAtual = Math.min(digitos.length, TAMANHO_DO_CODIGO - 1);
@@ -61,17 +73,22 @@ export function CampoDeCodigo({
     }
   };
 
-  const dicas = [erro && `${textos.componentes.erroDoCampo}: ${erro}`, ajuda].filter(Boolean);
+  // Sem `ajuda` visível, a dica de uso vai só ao leitor de tela.
+  const dicas = [
+    erro && `${textos.componentes.erroDoCampo}: ${erro}`,
+    ajuda ?? (erro ? undefined : textos.componentes.codigo.dica),
+  ].filter(Boolean);
 
   return (
     <View style={estilos.campo}>
-      <Text
+      <Pressable
+        accessible={false}
         accessibilityElementsHidden
         importantForAccessibility="no"
-        style={[estilos.rotulo, desabilitado && estilos.rotuloDesabilitado]}
+        onPress={() => refDaEntrada.current?.focus()}
       >
-        {rotulo}
-      </Text>
+        <Text style={[estilos.rotulo, desabilitado && estilos.rotuloDesabilitado]}>{rotulo}</Text>
+      </Pressable>
       <View style={estilos.area}>
         <View
           accessibilityElementsHidden
@@ -95,8 +112,9 @@ export function CampoDeCodigo({
         </View>
         {/* Cobre as casas: recebe o toque, o foco, a colagem e o código de uso único do sistema. */}
         <TextInput
-          ref={ref}
+          ref={refDoCampo}
           testID={testID}
+          autoFocus={autoFocus}
           value={digitos}
           onChangeText={aoMudar}
           editable={!desabilitado}

@@ -1,7 +1,7 @@
 // Toast (design system, "Toasts e banners"): fundo `toast.bg`, texto `text.onAction`, símbolo por
-// tipo; some em 4 s (6 s com ação "Desfazer"); pausa com foco ou toque; anunciado de forma
-// educada. Erro que exige ação nunca é toast: vira Banner ou erro de campo (por isso não há tipo
-// de erro). Sem animação: com "remover animações" ligado o comportamento já é o pedido.
+// tipo; some em 4 s (6 s com ação "Desfazer"; o dobro com leitor de tela ou fonte ampliada);
+// pausa com foco ou toque; anunciado de forma educada. Erro que exige ação nunca é toast: vira
+// Banner ou erro de campo (por isso não há tipo de erro). Sem animação: com "remover animações" ligado o comportamento já é o pedido.
 // `ProvedorDeToast` põe um toast por vez acima do conteúdo; `useToast()` o dispara de qualquer tela.
 import { espaco, raio, tamanho, temaClaro } from '@bairrin/tokens';
 import {
@@ -14,7 +14,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
 import { anunciar, useFoco } from './acessibilidade.ts';
 import { anelDeFocoSobreEscuro, estiloDeTexto, sombraDeElevacao } from './estilos.ts';
 
@@ -55,7 +55,24 @@ export function Toast({ mensagem, tipo = 'informativo', acao, aoDispensar, testI
   }, [mensagem]);
 
   // Pausado (toque ou foco na ação), o relógio para; ao soltar, a contagem recomeça inteira.
-  const duracao = acao ? DURACAO_DO_TOAST_COM_ACAO_EM_MS : DURACAO_DO_TOAST_EM_MS;
+  // Tempo ajustável (WCAG 2.2.1): com leitor de tela ou fonte ampliada a duração dobra.
+  const [leitorDeTela, setLeitorDeTela] = useState(false);
+  useEffect(() => {
+    let ativo = true;
+    // Se a consulta nativa falhar, fica a duração padrão.
+    void Promise.resolve(AccessibilityInfo.isScreenReaderEnabled())
+      .then((ligado) => {
+        if (ativo) setLeitorDeTela(Boolean(ligado));
+      })
+      .catch(() => {});
+    return () => {
+      ativo = false;
+    };
+  }, []);
+  const precisaDeMaisTempo = leitorDeTela || PixelRatio.getFontScale() > 1.3;
+  const duracao =
+    (acao ? DURACAO_DO_TOAST_COM_ACAO_EM_MS : DURACAO_DO_TOAST_EM_MS) *
+    (precisaDeMaisTempo ? 2 : 1);
   useEffect(() => {
     if (pausado) return;
     const relogio = setTimeout(() => dispensar.current(), duracao);

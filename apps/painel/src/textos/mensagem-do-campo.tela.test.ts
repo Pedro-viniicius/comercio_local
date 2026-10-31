@@ -1,7 +1,7 @@
 // Texto por tela de `mensagemDoCampo` (D1, CA-13): as duas frases do segundo fator vêm da spec
 // 01 (P1a e P1b), escritas por extenso aqui para o teste não repetir o `pt-BR.ts` que confere.
 import { describe, expect, it } from 'vitest';
-import { mensagemDoCampo } from './mensagem-do-campo.ts';
+import { mensagemDoCampo, type TelaComTextoProprio } from './mensagem-do-campo.ts';
 
 const P1A = 'Código inválido ou expirado. Confira o horário do celular e tente de novo.';
 const P1B = 'Código não confere. Confira o horário do celular e digite o código atual.';
@@ -33,7 +33,8 @@ describe('mensagemDoCampo com tela (D1)', () => {
   it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty', '', 'entrar'])(
     'tela "%s" que não existe cai no texto geral, sem achar propriedade herdada',
     (tela) => {
-      expect(mensagemDoCampo('codigo', 'invalido', 'm', tela)).toBe(P1A);
+      // O tipo recusa esses nomes; a conversão simula um valor que chega sem o tipo (JS).
+      expect(mensagemDoCampo('codigo', 'invalido', 'm', tela as TelaComTextoProprio)).toBe(P1A);
     },
   );
 

@@ -6,13 +6,17 @@
 //   par que ainda precisa ser revogado no servidor (S80).
 // - Toda entrada é gravada com `WHEN_UNLOCKED_THIS_DEVICE_ONLY`: só se lê com o aparelho
 //   desbloqueado, e o item não vai para backup nem para outro aparelho.
-// - Primeira abertura depois de instalar (S18): o Keychain do iOS sobrevive à desinstalação, então,
-//   sem a marca de instalação, as duas chaves são apagadas antes de qualquer leitura ou escrita.
+// - Primeira abertura depois de instalar (S18, S127): o Keychain do iOS sobrevive à desinstalação.
+//   Sem a marca de instalação, antes de qualquer leitura ou escrita, o par da instalação anterior e
+//   as revogações pendentes dela viram uma revogação pendente só, e a chave da sessão é apagada: o
+//   par antigo nunca volta como sessão, e o servidor o revoga quando houver rede.
 // - Os erros do SecureStore trazem a mensagem nativa; aqui viram erros sem detalhe.
-import type {
-  ArmazenamentoDeRevogacao,
-  ArmazenamentoDeSessao,
-  RevogacaoPendente,
+import {
+  MAXIMO_DE_REVOGACOES_PENDENTES,
+  type ArmazenamentoDeRevogacao,
+  type ArmazenamentoDeSessao,
+  type CredencialPendente,
+  type RevogacaoPendente,
 } from '@bairrin/cliente-api';
 import { sessaoSchema, type Sessao } from '@bairrin/contratos';
 import {
@@ -79,10 +83,63 @@ async function apagar(chave: string): Promise<void> {
   await deleteItemAsync(chave, OPCOES_DO_SECURE_STORE).catch(semDetalhe('apagar'));
 }
 
+/** Só os tokens em texto de um valor guardado; `null` se não tiver nenhum. */
+function credencialGuardada(valor: unknown): CredencialPendente | null {
+  if (typeof valor !== 'object' || valor === null) return null;
+  const { tokenAcesso, tokenRenovacao } = valor as Record<string, unknown>;
+  const credencial: CredencialPendente = {};
+  if (typeof tokenAcesso === 'string') credencial.tokenAcesso = tokenAcesso;
+  if (typeof tokenRenovacao === 'string') credencial.tokenRenovacao = tokenRenovacao;
+  return credencial.tokenAcesso === undefined && credencial.tokenRenovacao === undefined
+    ? null
+    : credencial;
+}
+
+/**
+ * O que a instalação anterior deixou para revogar (S127): o par da sessão, que é o mais novo, e
+ * depois as pendências dela, sem repetir e no máximo `MAXIMO_DE_REVOGACOES_PENDENTES`. `null`
+ * quando não há nada.
+ */
+function revogacaoDaInstalacaoAnterior(
+  sessaoAntiga: unknown,
+  pendenciaAntiga: unknown,
+): RevogacaoPendente | null {
+  const anteriores =
+    typeof pendenciaAntiga === 'object' &&
+    pendenciaAntiga !== null &&
+    'anteriores' in pendenciaAntiga &&
+    Array.isArray(pendenciaAntiga.anteriores)
+      ? (pendenciaAntiga.anteriores as unknown[])
+      : [];
+  const vistas = new Set<string>();
+  const lista: CredencialPendente[] = [];
+  for (const valor of [sessaoAntiga, pendenciaAntiga, ...anteriores]) {
+    const credencial = credencialGuardada(valor);
+    if (credencial === null) continue;
+    // Uma tentativa que parou no meio já pôs o par da sessão na pendência: não entra duas vezes.
+    const chave = JSON.stringify([credencial.tokenAcesso, credencial.tokenRenovacao]);
+    if (vistas.has(chave)) continue;
+    vistas.add(chave);
+    lista.push(credencial);
+  }
+  const [maisNova, ...demais] = lista.slice(0, MAXIMO_DE_REVOGACOES_PENDENTES);
+  if (maisNova === undefined) return null;
+  return demais.length > 0 ? { ...maisNova, anteriores: demais } : maisNova;
+}
+
+/** Leitura da primeira abertura: um valor que não se lê conta como ausente (só não é revogado). */
+async function lerOuNada(chave: string): Promise<unknown> {
+  try {
+    return await ler(chave);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Os dois armazenamentos que o `criarClienteAutenticado` recebe nos apps. Toda operação espera a
- * limpeza da primeira abertura; se ela falhar, a operação rejeita e a próxima tenta de novo, para
- * nunca ler a sessão de uma instalação anterior.
+ * preparação da primeira abertura; se ela falhar, a operação rejeita e a próxima tenta de novo,
+ * para nunca ler a sessão de uma instalação anterior.
  */
 export function criarCofreDaSessao(opcoes: OpcoesDoCofreDaSessao = {}): CofreDaSessao {
   const marca = opcoes.marca ?? marcaDeInstalacaoNoAparelho;
@@ -102,16 +159,27 @@ export function criarCofreDaSessao(opcoes: OpcoesDoCofreDaSessao = {}): CofreDaS
     try {
       instalacaoConhecida = await marca.existe();
     } catch {
-      // Sem como saber, a instalação conta como nova: perder a sessão só pede outro login.
+      // Sem como saber, a instalação conta como nova: a sessão vira revogação e pede outro login.
       avisar('marca_de_instalacao');
       instalacaoConhecida = false;
     }
     if (instalacaoConhecida) return;
-    await Promise.all([apagar(CHAVE_DA_SESSAO), apagar(CHAVE_DA_REVOGACAO_PENDENTE)]);
+    const [sessaoAntiga, pendenciaAntiga] = await Promise.all([
+      lerOuNada(CHAVE_DA_SESSAO),
+      lerOuNada(CHAVE_DA_REVOGACAO_PENDENTE),
+    ]);
+    const revogacao = revogacaoDaInstalacaoAnterior(sessaoAntiga, pendenciaAntiga);
+    // A pendência é gravada antes de a sessão sair: se o app fechar no meio, a próxima abertura
+    // refaz a conversão sem perder o par.
+    await (revogacao === null
+      ? apagar(CHAVE_DA_REVOGACAO_PENDENTE)
+      : gravar(CHAVE_DA_REVOGACAO_PENDENTE, revogacao));
+    await apagar(CHAVE_DA_SESSAO);
     try {
       await marca.marcar();
     } catch {
-      // A próxima abertura apaga de novo e pede login; o uso agora segue.
+      // A próxima abertura converte de novo (a sessão desta vira revogação) e pede login; o uso
+      // agora segue.
       avisar('marca_de_instalacao');
     }
   }

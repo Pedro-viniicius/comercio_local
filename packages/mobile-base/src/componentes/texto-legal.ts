@@ -73,6 +73,15 @@ const DESLOCAMENTO_DE_BRASILIA_EM_MS = -3 * 60 * 60 * 1000;
 
 const doisDigitos = (numero: number) => String(numero).padStart(2, '0');
 
+/** Se `AAAA-MM-DD` existe no calendário (Q38): 31/02, 31/04 e 29/02 de ano comum não existem. */
+function dataExiste(ano: number, mes: number, dia: number): boolean {
+  const data = new Date(0);
+  data.setUTCFullYear(ano, mes - 1, dia);
+  return (
+    data.getUTCFullYear() === ano && data.getUTCMonth() === mes - 1 && data.getUTCDate() === dia
+  );
+}
+
 /**
  * `AAAA-MM-DD` ou data e hora ISO 8601 → `dd/mm/aaaa` no horário de Brasília. Texto que não é
  * data devolve `null` (a tela omite o "vigente desde").
@@ -82,12 +91,15 @@ export function formatarDataLegal(valor: string): string | null {
   const soData = DATA_SEM_HORA.exec(texto);
   if (soData) {
     const [, ano, mes, dia] = soData;
-    return Number(mes) >= 1 && Number(mes) <= 12 && Number(dia) >= 1 && Number(dia) <= 31
-      ? `${dia}/${mes}/${ano}`
-      : null;
+    return dataExiste(Number(ano), Number(mes), Number(dia)) ? `${dia}/${mes}/${ano}` : null;
   }
+  // Com hora, o `Date.parse` leva 31/02 para 03/03 em vez de recusar: a data confere antes.
+  const comHora = /^(\d{4})-(\d{2})-(\d{2})T/.exec(texto);
+  if (comHora === null) return null;
+  const [, ano, mes, dia] = comHora;
+  if (!dataExiste(Number(ano), Number(mes), Number(dia))) return null;
   const instante = Date.parse(texto);
-  if (Number.isNaN(instante) || !/^\d{4}-\d{2}-\d{2}T/.test(texto)) return null;
+  if (Number.isNaN(instante)) return null;
   const brasilia = new Date(instante + DESLOCAMENTO_DE_BRASILIA_EM_MS);
   return `${doisDigitos(brasilia.getUTCDate())}/${doisDigitos(brasilia.getUTCMonth() + 1)}/${brasilia.getUTCFullYear()}`;
 }

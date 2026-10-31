@@ -4,7 +4,9 @@
 // token vive só no SecureStore. `import()` e `require` não entram, e nenhum comentário desliga as
 // regras (`noInlineConfig`). As regras são lidas da configuração real do repositório, como o ESLint
 // as aplica a um arquivo dessa pasta, e rodam sobre trechos com o parser do typescript-eslint. O
-// teste de SecureStore de verdade fica em `packages/mobile-base/src/sessao/*.test.ts(x)`.
+// teste de SecureStore de verdade fica em `packages/mobile-base/src/sessao/*.test.ts(x)`. O
+// SecureStore e a marca de instalação só entram no cofre (`armazenamento-seguro.ts`, S128), e a
+// pasta da marca (`src/instalacao`) tem a sua própria lista (R10).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -134,19 +136,61 @@ describe('regra de lint da sessão (mobile-base)', () => {
   }
 
   for (const trecho of [
-    "import * as cofre from 'expo-secure-store';",
     "import { useState } from 'react';",
     "import { criarClienteAutenticado } from '@bairrin/cliente-api';",
     "import { sessaoSchema } from '@bairrin/contratos';",
     "import { QueryClient } from '@tanstack/react-query';",
     "import { x } from './outro-arquivo.ts';",
     "import { x } from './teste/cenario.ts';",
-    "import { marcaDeInstalacaoNoAparelho } from '../instalacao/marca-de-instalacao.ts';",
   ]) {
     it(`deixa passar em src/sessao: ${trecho}`, async () => {
       assert.deepEqual(await violacoes(trecho), []);
     });
   }
+
+  // S128: o SecureStore e a marca de instalação só no cofre, que aplica as opções em toda chamada.
+  const SO_NO_COFRE = [
+    "import * as cofre from 'expo-secure-store';",
+    "import { setItemAsync } from 'expo-secure-store';",
+    "import type { SecureStoreOptions } from 'expo-secure-store';",
+    "export { getItemAsync } from 'expo-secure-store';",
+    "import { marcaDeInstalacaoNoAparelho } from '../instalacao/marca-de-instalacao.ts';",
+  ];
+  const COFRE = 'packages/mobile-base/src/sessao/armazenamento-seguro.ts';
+
+  it('o SecureStore e a marca de instalação reprovam em src/sessao fora do cofre, inclusive nos testes', async () => {
+    for (const caminho of [
+      'packages/mobile-base/src/sessao/x.ts',
+      'packages/mobile-base/src/sessao/sessao-do-app.ts',
+      'packages/mobile-base/src/sessao/provedor-de-sessao.tsx',
+      'packages/mobile-base/src/sessao/armazenamento-seguro.test.ts',
+      'packages/mobile-base/src/sessao/teste/x.ts',
+      'packages/mobile-base/src/sessao/a/armazenamento-seguro.ts',
+    ]) {
+      for (const trecho of SO_NO_COFRE) {
+        assert.ok((await violacoes(trecho, caminho)).length > 0, `${trecho} em ${caminho}`);
+      }
+    }
+  });
+
+  it('no cofre (armazenamento-seguro.ts), o SecureStore e a marca passam, e o resto da lista vale', async () => {
+    for (const trecho of [...SO_NO_COFRE, "import { sessaoSchema } from '@bairrin/contratos';"]) {
+      assert.deepEqual(await violacoes(trecho, COFRE), [], trecho);
+    }
+    for (const trecho of [
+      "import fs from 'expo-file-system';",
+      "import { Settings } from 'react-native';",
+      "import { x } from '../instalacao/outro.ts';",
+      "import x from 'expo-secure-store/build/SecureStore';",
+      "const cofre = await import('expo-secure-store');",
+      "const cofre = require('expo-secure-store');",
+    ]) {
+      assert.ok(
+        (await violacoes(trecho, COFRE)).length > 0,
+        `deveria reprovar no cofre: ${trecho}`,
+      );
+    }
+  });
 
   it('nos testes e auxiliares da sessão, só acrescenta a Testing Library (e `../` nos auxiliares)', async () => {
     const rntl = "import { render } from '@testing-library/react-native';";
@@ -186,6 +230,16 @@ describe('regra de lint da sessão (mobile-base)', () => {
     }
   });
 
+  it('nenhum comentário desliga a regra no cofre (noInlineConfig)', async () => {
+    const [resultado] = await eslint.lintText(
+      "/* eslint-disable */\nimport fs from 'expo-file-system';\nexport default fs;\n",
+      { filePath: `${RAIZ}${COFRE}` },
+    );
+    assert.ok(
+      resultado.messages.some((m) => m.ruleId === 'no-restricted-imports' && m.severity === 2),
+    );
+  });
+
   it('deixa o expo-file-system fora de src/sessao (a cópia dos dados do titular, S10)', async () => {
     const trecho = "import { File } from 'expo-file-system';";
     for (const caminho of [
@@ -194,6 +248,76 @@ describe('regra de lint da sessão (mobile-base)', () => {
       'apps/consumidor/src/telas/x.tsx',
     ]) {
       assert.deepEqual(await violacoes(trecho, caminho), [], caminho);
+    }
+  });
+});
+
+// R10: a marca de instalação (`src/instalacao`) é a única importação de fora que a sessão aceita,
+// então a pasta tem a mesma proteção: só `expo-file-system` e arquivos dela, sem `import()` nem
+// `require`, sem desligar por comentário.
+describe('regra de lint da marca de instalação (mobile-base)', () => {
+  const MARCA = 'packages/mobile-base/src/instalacao/marca-de-instalacao.ts';
+
+  it('a configuração real liga as duas regras como erro em src/instalacao, inclusive em teste e subpasta', async () => {
+    for (const caminho of [
+      MARCA,
+      'packages/mobile-base/src/instalacao/marca-de-instalacao.test.ts',
+      'packages/mobile-base/src/instalacao/a/x.tsx',
+      'packages/mobile-base/src/instalacao/x.js',
+    ]) {
+      const configuracao = await eslint.calculateConfigForFile(caminho);
+      for (const nome of REGRAS) {
+        const regra = configuracao?.rules?.[nome];
+        assert.ok(Array.isArray(regra), `${nome} ausente em ${caminho}`);
+        assert.equal(regra[0], 2, `${nome} não é erro em ${caminho}`);
+      }
+    }
+  });
+
+  for (const trecho of [
+    "import a from '@react-native-async-storage/async-storage';",
+    "import * as cofre from 'expo-secure-store';",
+    "import { Settings } from 'react-native';",
+    "import { openDatabaseSync } from 'expo-sqlite';",
+    "import { useState } from 'react';",
+    "import { criarClienteAutenticado } from '@bairrin/cliente-api';",
+    "import fs from 'expo-file-system/legacy';",
+    "import fs from 'Expo-File-System';",
+    "import { x } from '../sessao/sessao-do-app.ts';",
+    "import { x } from './a/../../sessao/x.ts';",
+    "const fs = await import('expo-file-system');",
+    "const fs = require('expo-file-system');",
+    "import a = require('@react-native-async-storage/async-storage');",
+    "const r = require; r('expo-file-system');",
+  ]) {
+    it(`reprova em src/instalacao: ${trecho}`, async () => {
+      assert.ok((await violacoes(trecho, MARCA)).length > 0, `deveria reprovar: ${trecho}`);
+    });
+  }
+
+  for (const trecho of [
+    "import { File, Paths } from 'expo-file-system';",
+    "import { x } from './marca-de-instalacao.ts';",
+  ]) {
+    it(`deixa passar em src/instalacao: ${trecho}`, async () => {
+      assert.deepEqual(await violacoes(trecho, MARCA), []);
+    });
+  }
+
+  it('nenhum comentário desliga a regra em src/instalacao (noInlineConfig)', async () => {
+    for (const comentario of [
+      '/* eslint-disable */',
+      '// eslint-disable-next-line no-restricted-imports',
+      '/* eslint no-restricted-imports: "off" */',
+    ]) {
+      const [resultado] = await eslint.lintText(
+        `${comentario}\nimport a from '@react-native-async-storage/async-storage';\nexport default a;\n`,
+        { filePath: `${RAIZ}packages/mobile-base/src/instalacao/desligada.js` },
+      );
+      assert.ok(
+        resultado.messages.some((m) => m.ruleId === 'no-restricted-imports' && m.severity === 2),
+        `o comentário desligou a regra: ${comentario}`,
+      );
     }
   });
 });

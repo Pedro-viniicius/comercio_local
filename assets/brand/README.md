@@ -27,4 +27,4 @@ Mesmo símbolo do consumidor, com fundo `#18336B` (`blue.900`) no lugar de `#1F5
 
 ## PNG
 
-`./assets/brand/gerar-png.sh` usa o Chrome headless e o Pillow (sem instalar nada) e grava em `assets/brand/png/`: ícone iOS 1024 sem transparência, frente e mono do Android em 1024 (transparentes), splash 1024 e ícone da Google Play 512, para consumidor e lojista. Refaça os PNG sempre que um SVG mudar.
+`./assets/brand/gerar-png.sh` usa o Chrome headless e o Pillow (sem instalar nada) e grava em `assets/brand/png/`: ícone iOS 1024 sem transparência, frente e mono do Android em 1024 (transparentes), splash 1024 e ícone da Google Play 512, para consumidor e lojista. Refaça os PNG sempre que um SVG mudar. O script apaga cada PNG antes de gerar e para com erro se o Chrome falhar ou se o arquivo não sair com o tamanho pedido. Os PNG ficam no git, porque o CI não tem Chrome e o antialiasing muda com a versão dele; `scripts/assets-brand.test.mjs` confere no CI o tamanho e o canal alfa de cada um.

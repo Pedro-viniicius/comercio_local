@@ -100,6 +100,7 @@ describe('ProvedorDeSessao, bordas', () => {
       'estado',
       'requisitar',
       'sair',
+      'substituirSessao',
     ]);
     expect(result.current.emailVerificado).toBe(false);
     for (const [, valor] of Object.entries(result.current)) {

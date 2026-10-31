@@ -66,6 +66,18 @@ jobs:
       - name: expo prebuild
         run: pnpm --filter ${{ matrix.app }} exec expo prebuild --platform android --clean --no-install
 
+      # Cache do Gradle depois do prebuild, quando os arquivos que formam a chave já existem (R19).
+      # Uma chave por app; só a main e o disparo manual gravam o cache.
+      - name: Cache do Gradle
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ matrix.app }}-${{ hashFiles(format('apps/{0}/android/**/*.gradle*', matrix.app), format('apps/{0}/android/**/gradle-wrapper.properties', matrix.app), 'pnpm-lock.yaml') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-${{ matrix.app }}-
+
       - name: Gradle assembleRelease
         working-directory: apps/${{ matrix.app }}/android
         run: ./gradlew assembleRelease --no-daemon --stacktrace

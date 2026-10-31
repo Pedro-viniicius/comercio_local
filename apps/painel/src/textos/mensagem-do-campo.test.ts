@@ -6,7 +6,7 @@ import {
   verificarSegundoFatorSchema,
 } from '@bairrin/contratos';
 import { describe, expect, it } from 'vitest';
-import { mensagemDoCampo } from './mensagem-do-campo.ts';
+import { mensagemDoCampo, type TelaComTextoProprio } from './mensagem-do-campo.ts';
 import { textos } from './pt-BR.ts';
 
 describe('mensagemDoCampo', () => {
@@ -153,7 +153,7 @@ describe('mensagemDoCampo com os contratos de identidade', () => {
     expect(mensagemDoCampo('codigo', 'obrigatorio', 'm', tela)).toBe(
       textos.erro.codigo.obrigatorio,
     );
-    expect(mensagemDoCampo('codigo', 'invalido', 'm', 'constructor')).toBe(
+    expect(mensagemDoCampo('codigo', 'invalido', 'm', 'constructor' as TelaComTextoProprio)).toBe(
       textos.erro.codigo.invalido,
     );
   });

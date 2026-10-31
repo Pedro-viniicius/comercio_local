@@ -84,6 +84,8 @@ export function CaixaDeSelecao({
             <Text
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
+              // O glifo mora num quadrado fixo de 24 px: não acompanha a fonte do sistema.
+              allowFontScaling={false}
               style={estilos.check}
             >
               ✓

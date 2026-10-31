@@ -1,12 +1,8 @@
 // Sessão dos apps (plano 01b, etapa 12). O índice do pacote (`src/index.ts`) reexporta daqui.
-export {
-  CHAVE_DA_REVOGACAO_PENDENTE,
-  CHAVE_DA_SESSAO,
-  criarCofreDaSessao,
-  type CofreDaSessao,
-  type OpcoesDoCofreDaSessao,
-  type OrigemDaFalhaNoCofre,
-} from './armazenamento-seguro.ts';
+// Só o que os apps usam (S128): o provedor, o hook, a URL da API, o persister e os tipos. O cofre
+// (`criarCofreDaSessao` e as chaves do SecureStore) e a `criarSessaoDoApp` ficam dentro do pacote:
+// nenhuma tela lê o token.
+export { type CofreDaSessao, type OrigemDaFalhaNoCofre } from './armazenamento-seguro.ts';
 export {
   CONSULTAS_PERSISTIDAS,
   criarPersisterPermitido,
@@ -23,13 +19,13 @@ export {
 } from './provedor-de-sessao.tsx';
 export {
   CAMINHO_DE_ENTRAR,
-  criarSessaoDoApp,
   ErroAoLimparDadosDaConta,
   type CredenciaisDeEntrada,
   type EstadoDaSessao,
   type FilaOfflineDaConta,
   type OpcoesDaSessaoDoApp,
   type OrigemDaFalhaDaSessao,
+  type PedidoDeSessaoSubstituta,
   type SessaoDoApp,
   type SituacaoDaSessao,
 } from './sessao-do-app.ts';

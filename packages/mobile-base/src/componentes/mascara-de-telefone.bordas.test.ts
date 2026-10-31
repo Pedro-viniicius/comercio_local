@@ -107,21 +107,34 @@ describe('mascararTelefone contra o validador do contrato', () => {
     }
   });
 
-  // Q37 (baixa): reproduz o bug e falha de propósito até a correção; troque `it.failing` por `it`.
-  it.failing(
-    'celular argentino colado com +54 não vira um celular brasileiro válido (o contrato recusa outro país)',
-    () => {
-      // `+54 9 11 1234 5678`: a máscara só corta o `+55`; o resto é truncado em 11 dígitos e, por
-      // coincidência, vira o DDD 54 (RS) com 9 na frente: "(54) 91112-3456".
-      for (const texto of ['+54 9 11 1234 5678', '+54 9 351 123 4567']) {
-        expect(normalizarCelular(texto)).toBeNull();
-        expect(normalizarCelular(mascararTelefone(texto))).toBeNull();
-      }
-    },
-  );
+  // Q37: corrigido.
+  it('celular argentino colado com +54 não vira um celular brasileiro válido (o contrato recusa outro país)', () => {
+    // `+54 9 11 1234 5678`: a máscara só corta o `+55`; o resto é truncado em 11 dígitos e, por
+    // coincidência, vira o DDD 54 (RS) com 9 na frente: "(54) 91112-3456".
+    for (const texto of ['+54 9 11 1234 5678', '+54 9 351 123 4567']) {
+      expect(normalizarCelular(texto)).toBeNull();
+      expect(normalizarCelular(mascararTelefone(texto))).toBeNull();
+    }
+  });
+
+  it('outro país fica com o + e os algarismos, sem DDD; o + seguido de 5 ainda pode ser o +55 (Q37)', () => {
+    expect(mascararTelefone('+54 9 11 1234 5678')).toBe('+5491112345678');
+    expect(digitosDoCelular('+54 9 11 1234 5678')).toBe('');
+    expect(mascararTelefone('+1 415 555 2671')).toBe('+14155552671');
+    expect(mascararTelefone('+4')).toBe('+4');
+    // Começo do +55: segue a máscara brasileira.
+    expect(mascararTelefone('+5')).toBe('(5');
+    expect(mascararTelefone('+55 35 99999-1234')).toBe('(35) 99999-1234');
+  });
 
   it('texto gigante ou com caracteres estranhos não trava nem passa de 15 caracteres', () => {
-    const entradas = ['9'.repeat(100_000), '😀'.repeat(1000), '٣٥ ３５', '\u0000'];
+    const entradas = [
+      '9'.repeat(100_000),
+      `+54${'9'.repeat(100_000)}`,
+      '😀'.repeat(1000),
+      '٣٥ ３５',
+      '\u0000',
+    ];
     for (const entrada of entradas) {
       expect(mascararTelefone(entrada).length).toBeLessThanOrEqual('(35) 99999-1234'.length);
     }

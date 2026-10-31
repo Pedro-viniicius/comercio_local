@@ -1,9 +1,11 @@
 ---
 name: grupo-m2-sessao-componentes
-description: M2 (etapas 12 e 12a do 01b, sessão dos apps e componentes) - R1 2026-10-31, Q36-Q38 baixos, testes novos, mutação, Q35 provado, armadilhas
+description: M2 (etapas 12 e 12a do 01b, sessão dos apps e componentes) - R1 e R2 2026-10-31, Q36-Q38 corrigidos, testes novos, mutação, Q35 provado, armadilhas
 metadata:
   type: project
 ---
+
+R2 (2026-10-31): Q36-Q38 e o resto da rodada 1 corrigidos, `it.failing` viraram `it`, suíte toda verde (mobile-base 469, painel 479, scripts 579, apps 21+21). Testes meus novos: R8 (nova tentativa, segundo login durante o DELETE da B recusada) e R9 (`substituirSessao` bordas) em `sessao-do-app.corridas.test.ts`, componentes D10/D12/D17/D19 em `*.test.tsx`, `scripts/gerar-png.test.mjs` (Chrome falso no PATH + Pillow; pula só sem Pillow). Mutação R2: 50 mutantes, todos mortos menos 1 equivalente. Armadilhas novas: o `focus` do mock do RN é `jest.fn` compartilhado entre testes (faça `foco.mockClear()` depois do `spyOn`); `isScreenReaderEnabled` rejeitando no Toast vira unhandled rejection (sem `.catch`, baixo, não reportado); `instalacao-limpa` estoura o timeout de 5 s do 1º teste do jest se rodar junto com outros jest/vitest (3/3 ok isolado).
 
 R1 (2026-10-31): APROVADO COM RESSALVAS (3 bugs baixos). Q36 (troca de conta com a fila da conta A falhando deixa o estado `com_sessao` sem sessão guardada e a sessão B sem revogação), Q37 (máscara de telefone transforma `+54 9 11 1234 5678` em celular BR válido), Q38 (`formatarDataLegal('2026-02-31')` devolve `31/02/2026`). Os 3 testes que reproduzem ficam VERMELHOS de propósito: `sessao-do-app.corridas.test.ts` ("a interface não fica com sessão"), `mascara-de-telefone.bordas.test.ts` ("celular argentino") e `texto-legal.bordas.test.ts` ("data impossível"). Por causa deles `instalacao-limpa.test.mjs` fica com 1 caso vermelho (mobile-base, cópia limpa) e o `pnpm -r` pula consumidor e lojista (dependentes). Quando o dev corrigir, tudo volta a verde.
 

@@ -2,7 +2,11 @@
 // na expiração e na troca de conta, ordem da tela de login, `clienteDoApp` e falhas só com a origem.
 import { ErroDeApi } from '@bairrin/cliente-api';
 import { z } from '@bairrin/contratos';
-import { CHAVE_DA_REVOGACAO_PENDENTE, CHAVE_DA_SESSAO } from './armazenamento-seguro.ts';
+import {
+  CHAVE_DA_REVOGACAO_PENDENTE,
+  CHAVE_DA_SESSAO,
+  criarCofreDaSessao,
+} from './armazenamento-seguro.ts';
 import { CAMINHO_DE_ENTRAR, ErroAoLimparDadosDaConta } from './sessao-do-app.ts';
 import { adiada, SEM_REDE, type RespostaFalsa } from './teste/api-falsa.ts';
 import {
@@ -382,7 +386,89 @@ describe('sessão do app', () => {
 
       expect(sessao.obterSituacao().estado).toBe('sem_sessao');
       expect(guardada(CHAVE_DA_SESSAO)).toBeUndefined();
-      expect(cenario.falhas).toEqual([['limpar_fila']]);
+      // A limpeza da fila foi tentada de novo no encerramento da sessão recebida (R8).
+      expect(cenario.falhas).toEqual([['limpar_fila'], ['limpar_fila']]);
+      // A sessão recebida não fica viva sem ninguém com o token: o DELETE saiu com ela e, sem
+      // resposta boa (404 aqui), ela fica como revogação pendente (S80).
+      expect(cenario.api.pedidos.at(-1)).toMatchObject({
+        metodo: 'DELETE',
+        caminho: '/v1/sessoes/atual',
+        cabecalhos: { Authorization: `Bearer ${SESSAO_A.tokenAcesso}` },
+      });
+      expect(guardada(CHAVE_DA_REVOGACAO_PENDENTE)).toEqual({
+        tokenAcesso: SESSAO_A.tokenAcesso,
+        tokenRenovacao: SESSAO_A.tokenRenovacao,
+      });
+    });
+
+    describe('com a fila da conta anterior sem apagar (R8)', () => {
+      function filaQueFalha() {
+        const fila = { falhar: false, limpar: () => Promise.resolve() };
+        fila.limpar = () =>
+          fila.falhar ? Promise.reject(new Error('sem acesso')) : Promise.resolve();
+        return fila;
+      }
+
+      it('A e B são revogadas no servidor, nenhum token fica no aparelho e a tela volta ao login', async () => {
+        const fila = filaQueFalha();
+        const { cenario, sessao } = await entrarComA(criarCenario({ filaOffline: fila }));
+        fila.falhar = true;
+        cenario.api.responder('DELETE /v1/sessoes/atual', () => OK_204);
+        cenario.api.responder(`POST ${CAMINHO_DE_ENTRAR}`, () => ({
+          status: 200,
+          corpo: SESSAO_B,
+        }));
+        const estados: string[] = [];
+        sessao.assinar(() => estados.push(sessao.obterSituacao().estado));
+
+        await expect(
+          sessao.entrar({ email: 'joao@exemplo.com', senha: 'outra senha qualquer' }),
+        ).rejects.toBeInstanceOf(ErroAoLimparDadosDaConta);
+
+        const revogacoes = cenario.api.pedidos
+          .filter((p) => p.metodo === 'DELETE')
+          .map((p) => p.cabecalhos.Authorization);
+        expect(revogacoes).toEqual([
+          `Bearer ${SESSAO_A.tokenAcesso}`,
+          `Bearer ${SESSAO_B.tokenAcesso}`,
+        ]);
+        expect(sessao.obterSituacao()).toEqual({ estado: 'sem_sessao', emailVerificado: null });
+        // Nunca passou por "com sessão" da conta B.
+        expect(estados).not.toContain('com_sessao');
+        expect(secureStoreFalso.itens.size).toBe(0);
+        // Sem sessão, a requisição seguinte sai sem Bearer.
+        cenario.api.responder('GET /v1/conta', () => ({ status: 401 }));
+        await expect(
+          sessao.requisitar({ caminho: '/v1/conta', esquema: z.unknown() }),
+        ).rejects.toBeInstanceOf(ErroDeApi);
+        expect(cenario.api.pedidos.at(-1)?.cabecalhos.Authorization).toBeUndefined();
+      });
+
+      it('sem rede, a sessão B fica como revogação pendente e sai na próxima chance', async () => {
+        const fila = filaQueFalha();
+        const { cenario, sessao } = await entrarComA(criarCenario({ filaOffline: fila }));
+        fila.falhar = true;
+        cenario.api.responder('DELETE /v1/sessoes/atual', () => SEM_REDE);
+        cenario.api.responder(`POST ${CAMINHO_DE_ENTRAR}`, () => ({
+          status: 200,
+          corpo: SESSAO_B,
+        }));
+
+        await expect(
+          sessao.entrar({ email: 'joao@exemplo.com', senha: 'outra senha qualquer' }),
+        ).rejects.toBeInstanceOf(ErroAoLimparDadosDaConta);
+
+        expect(guardada(CHAVE_DA_SESSAO)).toBeUndefined();
+        const pendente = guardada(CHAVE_DA_REVOGACAO_PENDENTE);
+        expect(pendente).toMatchObject({
+          tokenAcesso: SESSAO_B.tokenAcesso,
+          tokenRenovacao: SESSAO_B.tokenRenovacao,
+          anteriores: [
+            { tokenAcesso: SESSAO_A.tokenAcesso, tokenRenovacao: SESSAO_A.tokenRenovacao },
+          ],
+        });
+        expect(sessao.obterSituacao().estado).toBe('sem_sessao');
+      });
     });
 
     it('a falha do cache persistido (só dados públicos) não impede o login, mas é avisada', async () => {
@@ -392,6 +478,146 @@ describe('sessão do app', () => {
 
       expect(guardada(CHAVE_DA_SESSAO)).toEqual(SESSAO_A);
       expect(cenario.falhas).toEqual([['limpar_cache']]);
+    });
+  });
+
+  describe('substituirSessao: verificação do e-mail (R9)', () => {
+    const CAMINHO_DA_VERIFICACAO = '/v1/conta/verificacao-email';
+    const PEDIDO = {
+      metodo: 'POST',
+      caminho: CAMINHO_DA_VERIFICACAO,
+      corpo: { codigo: '123456' },
+    } as const;
+    const SESSAO_A_VERIFICADA = {
+      tokenAcesso: 'eyJhbGciOiJIUzI1NiJ9.acesso-verificado-a.assinatura-a3',
+      tokenRenovacao: 'renovacao-verificada-a-abcdef0123456789',
+      expiraEm: SESSAO_A.expiraEm,
+      emailVerificado: true,
+    };
+
+    it('troca o par pelo da resposta sem limpar os dados da conta, e as requisições seguintes usam o novo', async () => {
+      const { cenario, sessao } = await entrarComA();
+      cenario.queryClient.setQueryData(['conta'], { nome: 'Maria' });
+      cenario.api.responder(`POST ${CAMINHO_DA_VERIFICACAO}`, () => ({
+        status: 200,
+        corpo: SESSAO_A_VERIFICADA,
+      }));
+      cenario.api.responder('GET /v1/conta', () => ({ status: 200, corpo: { ok: true } }));
+
+      await sessao.substituirSessao(PEDIDO);
+
+      const verificacao = cenario.api.pedidos.at(-1);
+      expect(verificacao).toMatchObject({
+        metodo: 'POST',
+        caminho: CAMINHO_DA_VERIFICACAO,
+        corpo: { codigo: '123456' },
+        cabecalhos: { Authorization: `Bearer ${SESSAO_A.tokenAcesso}` },
+      });
+      expect(guardada(CHAVE_DA_SESSAO)).toEqual(SESSAO_A_VERIFICADA);
+      expect(sessao.obterSituacao()).toEqual({ estado: 'com_sessao', emailVerificado: true });
+      // Mesma conta: nada é limpo nem revogado.
+      expect(cenario.queryClient.getQueryData(['conta'])).toEqual({ nome: 'Maria' });
+      expect(cenario.persister.remocoes).toBe(0);
+      expect(chamadasDaFila()).toBe(0);
+      expect(cenario.api.pedidos.some((p) => p.metodo === 'DELETE')).toBe(false);
+      expect(guardada(CHAVE_DA_REVOGACAO_PENDENTE)).toBeUndefined();
+
+      await sessao.requisitar({ caminho: '/v1/conta', esquema: z.unknown() });
+      expect(cenario.api.pedidos.at(-1)?.cabecalhos.Authorization).toBe(
+        `Bearer ${SESSAO_A_VERIFICADA.tokenAcesso}`,
+      );
+    });
+
+    it('código errado: rejeita com o ErroDeApi e a sessão continua a mesma', async () => {
+      const { cenario, sessao } = await entrarComA();
+      cenario.api.responder(`POST ${CAMINHO_DA_VERIFICACAO}`, () => ({
+        status: 400,
+        corpo: {
+          erro: 'validacao',
+          campos: [{ campo: 'codigo', codigo: 'invalido', motivo: 'x' }],
+        },
+      }));
+
+      await expect(sessao.substituirSessao(PEDIDO)).rejects.toBeInstanceOf(ErroDeApi);
+
+      expect(guardada(CHAVE_DA_SESSAO)).toEqual(SESSAO_A);
+      expect(sessao.obterSituacao()).toEqual({ estado: 'com_sessao', emailVerificado: false });
+    });
+
+    it('logout enquanto a verificação corria: a sessão recebida não reabre a conta e é revogada', async () => {
+      const { cenario, sessao } = await entrarComA();
+      const resposta = adiada<RespostaFalsa>();
+      cenario.api.responder(`POST ${CAMINHO_DA_VERIFICACAO}`, () => resposta.promessa);
+      cenario.api.responder('DELETE /v1/sessoes/atual', () => OK_204);
+
+      const troca = sessao.substituirSessao(PEDIDO);
+      await umaVoltaDoRelogio();
+      await sessao.sair();
+      resposta.resolver({ status: 200, corpo: SESSAO_A_VERIFICADA });
+      await troca;
+
+      expect(sessao.obterSituacao().estado).toBe('sem_sessao');
+      expect(guardada(CHAVE_DA_SESSAO)).toBeUndefined();
+      expect(cenario.api.pedidos.at(-1)).toMatchObject({
+        metodo: 'DELETE',
+        cabecalhos: { Authorization: `Bearer ${SESSAO_A_VERIFICADA.tokenAcesso}` },
+      });
+      expect(guardada(CHAVE_DA_REVOGACAO_PENDENTE)).toBeUndefined();
+    });
+
+    it('outra conta entrou enquanto a verificação corria: a sessão dela fica', async () => {
+      const { cenario, sessao } = await entrarComA();
+      const resposta = adiada<RespostaFalsa>();
+      cenario.api.responder(`POST ${CAMINHO_DA_VERIFICACAO}`, () => resposta.promessa);
+      cenario.api.responder('DELETE /v1/sessoes/atual', () => OK_204);
+      cenario.api.responder(`POST ${CAMINHO_DE_ENTRAR}`, () => ({ status: 200, corpo: SESSAO_B }));
+
+      const troca = sessao.substituirSessao(PEDIDO);
+      await umaVoltaDoRelogio();
+      await sessao.entrar({ email: 'joao@exemplo.com', senha: 'outra senha qualquer' });
+      resposta.resolver({ status: 200, corpo: SESSAO_A_VERIFICADA });
+      await troca;
+
+      expect(guardada(CHAVE_DA_SESSAO)).toEqual(SESSAO_B);
+      expect(sessao.obterSituacao()).toEqual({ estado: 'com_sessao', emailVerificado: true });
+      expect(
+        JSON.stringify([...secureStoreFalso.itens]).includes(SESSAO_A_VERIFICADA.tokenAcesso),
+      ).toBe(false);
+    });
+  });
+
+  describe('reinstalação (S127)', () => {
+    it('o par e a pendência da instalação anterior são revogados no servidor na 1ª abertura, e a tela fica no login', async () => {
+      const PENDENTE_ANTIGA = {
+        tokenAcesso: 'eyJhbGciOiJIUzI1NiJ9.acesso-de-logout-sem-rede.assinatura',
+        tokenRenovacao: 'renovacao-de-logout-sem-rede-0123456789ab',
+      };
+      secureStoreFalso.itens.set(CHAVE_DA_SESSAO, JSON.stringify(SESSAO_A));
+      secureStoreFalso.itens.set(CHAVE_DA_REVOGACAO_PENDENTE, JSON.stringify(PENDENTE_ANTIGA));
+      const cenario = criarCenario({
+        cofre: criarCofreDaSessao({
+          marca: { existe: () => Promise.resolve(false), marcar: () => Promise.resolve() },
+        }),
+      });
+      cenario.api.responder('DELETE /v1/sessoes/atual', () => OK_204);
+      const sessao = montarSessao(cenario);
+
+      await sessao.iniciar();
+      expect(sessao.obterSituacao()).toEqual({ estado: 'sem_sessao', emailVerificado: null });
+      // A revogação retomada não é esperada pela abertura: corre em segundo plano.
+      for (let volta = 0; volta < 10 && secureStoreFalso.itens.size > 0; volta += 1) {
+        await umaVoltaDoRelogio();
+      }
+
+      expect(
+        cenario.api.pedidos
+          .filter((p) => p.metodo === 'DELETE')
+          .map((p) => p.cabecalhos.Authorization)
+          .sort(),
+      ).toEqual([`Bearer ${SESSAO_A.tokenAcesso}`, `Bearer ${PENDENTE_ANTIGA.tokenAcesso}`].sort());
+      // Nenhuma renovação com o par antigo: ele nunca voltou como sessão.
+      expect(cenario.api.pedidos.some((p) => p.caminho === '/v1/sessoes/renovacao')).toBe(false);
+      expect(secureStoreFalso.itens.size).toBe(0);
     });
   });
 

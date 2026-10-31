@@ -1,7 +1,7 @@
 import { raio, temaClaro } from '@bairrin/tokens';
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { useState } from 'react';
-import { AccessibilityInfo, Platform } from 'react-native';
+import { createRef, useState } from 'react';
+import { AccessibilityInfo, Platform, type TextInputInstance } from 'react-native';
 import { CampoDeCodigo, digitosDoCodigo, type CampoDeCodigoProps } from './CampoDeCodigo.tsx';
 
 function Controlado({
@@ -216,6 +216,49 @@ describe('CampoDeCodigo', () => {
       await rerender(<Controlado erro="Código inválido" />);
 
       expect(anunciar).toHaveBeenCalledTimes(vezes);
+    });
+  });
+
+  describe('foco, rótulo tocável e dica (D16, D17, D18)', () => {
+    it('repassa `autoFocus` à entrada', async () => {
+      await render(<Controlado autoFocus />);
+      expect(campo().props.autoFocus).toBe(true);
+    });
+
+    it('tocar no rótulo visível leva o foco ao campo', async () => {
+      const ref = createRef<TextInputInstance>();
+      await render(<Controlado ref={ref} />);
+      const foco = jest.spyOn(ref.current as TextInputInstance, 'focus');
+      // O `focus` do mock do React Native é um `jest.fn` compartilhado entre os testes.
+      foco.mockClear();
+
+      await fireEvent.press(
+        screen.getByText('Código de 6 dígitos', { includeHiddenElements: true }),
+      );
+      expect(foco).toHaveBeenCalledTimes(1);
+    });
+
+    it('com erro e sem `ajuda`, a dica de uso não se soma ao erro lido pelo leitor de tela', async () => {
+      await render(<Controlado erro="Código incorreto." />);
+      const dica = campo().props.accessibilityHint as string;
+      expect(dica).toContain('Código incorreto.');
+      expect(dica).not.toContain('O envio é automático');
+    });
+
+    it('a ref da tela como função recebe a entrada', async () => {
+      const recebidas: (TextInputInstance | null)[] = [];
+      await render(<Controlado ref={(entrada) => void recebidas.push(entrada)} />);
+      expect(recebidas.at(-1)).not.toBeNull();
+    });
+
+    it('sem `ajuda` nem erro, o leitor de tela recebe a dica de uso; com `ajuda`, a ajuda', async () => {
+      const { rerender } = await render(<Controlado />);
+      expect(campo().props.accessibilityHint).toBe(
+        'Digite os 6 dígitos. O envio é automático ao completar.',
+      );
+
+      await rerender(<Controlado ajuda="Enviamos para ana@exemplo.com.br" />);
+      expect(campo().props.accessibilityHint).toBe('Enviamos para ana@exemplo.com.br');
     });
   });
 });

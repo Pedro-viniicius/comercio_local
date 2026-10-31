@@ -176,73 +176,94 @@ export default defineConfig(
   // os imports seguem uma lista de permissão (S121): qualquer módulo fora dela (AsyncStorage,
   // FileSystem, SQLite, o `Settings` do `react-native`, que gravam em texto puro, ou um pacote novo)
   // reprova. `import()` e `require` não entram, nem com caminho literal. Nenhum comentário desliga
-  // regra nesses arquivos (`noInlineConfig`). A marca de instalação (`src/instalacao`, que usa o
-  // FileSystem sem receber dado) é a única importação de fora da pasta.
+  // regra nesses arquivos (`noInlineConfig`). O `expo-secure-store` e a marca de instalação
+  // (`src/instalacao`, que usa o FileSystem sem receber dado) só entram em `armazenamento-seguro.ts`
+  // (S128), que aplica `WHEN_UNLOCKED_THIS_DEVICE_ONLY` em toda chamada. `src/instalacao` tem a
+  // sua própria lista (R10): só o `expo-file-system` e os arquivos da pasta.
   ...(() => {
     const ARQUIVOS = '{js,jsx,cjs,mjs,ts,tsx,mts,cts}';
+    // Relativo dentro da pasta, sem `..` no meio.
+    const DA_PASTA = String.raw`\./[\w-]+(?:\.[\w-]+)*(?:/[\w-]+(?:\.[\w-]+)*)*`;
     const PERMITIDOS = [
-      'expo-secure-store',
       'react',
       '@bairrin/cliente-api',
       '@bairrin/contratos',
       '@tanstack/react-query',
-      // Relativo dentro da pasta, sem `..` no meio.
-      String.raw`\./[\w-]+(?:\.[\w-]+)*(?:/[\w-]+(?:\.[\w-]+)*)*`,
-      String.raw`\.\./instalacao/marca-de-instalacao\.ts`,
+      DA_PASTA,
     ];
+    const NO_COFRE = ['expo-secure-store', String.raw`\.\./instalacao/marca-de-instalacao\.ts`];
     const NOS_TESTES = ['@testing-library/react-native'];
     // Os auxiliares de `src/sessao/teste` importam da pasta de cima (`../x.ts`), e só dela.
     const NOS_AUXILIARES = [String.raw`\.\./[\w-]+(?:\.[\w-]+)*`];
-    const mensagem =
-      'A sessão só importa da lista permitida (CA-03, S121): expo-secure-store, react, ' +
-      '@bairrin/cliente-api, @bairrin/contratos, @tanstack/react-query e arquivos da pasta. ' +
-      'AsyncStorage, FileSystem e SQLite gravam em texto puro.';
-    const listaDePermissao = (lista) => [
+    const mensagemDaSessao =
+      'A sessão só importa da lista permitida (CA-03, S121): react, @bairrin/cliente-api, ' +
+      '@bairrin/contratos, @tanstack/react-query e arquivos da pasta; expo-secure-store e a marca ' +
+      'de instalação, só em armazenamento-seguro.ts (S128). AsyncStorage, FileSystem e SQLite ' +
+      'gravam em texto puro.';
+    const mensagemDaInstalacao =
+      'A marca de instalação só importa expo-file-system e arquivos da própria pasta (R10, S121): ' +
+      'ela não recebe nem grava dado.';
+    const listaDePermissao = (lista, message = mensagemDaSessao) => [
       'error',
       {
         patterns: [
           {
             regex: `^(?!(?:${lista.join('|')})$)`,
             caseSensitive: true,
-            message: mensagem,
+            message,
           },
         ],
       },
     ];
+    const semImportDinamico = (onde) => [
+      'error',
+      {
+        selector: 'ImportExpression',
+        message: `Sem \`import()\` ${onde} (S121): só \`import\` estático da lista permitida.`,
+      },
+      {
+        selector: "Identifier[name='require']",
+        message: `Sem \`require\` ${onde} (S121): só \`import\` estático da lista permitida.`,
+      },
+    ];
+    const SESSAO = 'packages/mobile-base/src/sessao';
+    const INSTALACAO = 'packages/mobile-base/src/instalacao';
     return [
       {
-        files: [`packages/mobile-base/src/sessao/**/*.${ARQUIVOS}`],
+        files: [`${SESSAO}/**/*.${ARQUIVOS}`],
         linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'error' },
         rules: {
           'no-restricted-imports': listaDePermissao(PERMITIDOS),
-          'no-restricted-syntax': [
-            'error',
-            {
-              selector: 'ImportExpression',
-              message: 'Sem `import()` na sessão (S121): só `import` estático da lista permitida.',
-            },
-            {
-              selector: "Identifier[name='require']",
-              message: 'Sem `require` na sessão (S121): só `import` estático da lista permitida.',
-            },
-          ],
+          'no-restricted-syntax': semImportDinamico('na sessão'),
         },
       },
       {
-        files: [
-          `packages/mobile-base/src/sessao/**/*.test.${ARQUIVOS}`,
-          `packages/mobile-base/src/sessao/teste/**/*.${ARQUIVOS}`,
-        ],
+        files: [`${SESSAO}/armazenamento-seguro.ts`],
+        rules: { 'no-restricted-imports': listaDePermissao([...PERMITIDOS, ...NO_COFRE]) },
+      },
+      {
+        files: [`${SESSAO}/**/*.test.${ARQUIVOS}`, `${SESSAO}/teste/**/*.${ARQUIVOS}`],
         rules: { 'no-restricted-imports': listaDePermissao([...PERMITIDOS, ...NOS_TESTES]) },
       },
       {
-        files: [`packages/mobile-base/src/sessao/teste/*.${ARQUIVOS}`],
+        files: [`${SESSAO}/teste/*.${ARQUIVOS}`],
         rules: {
           'no-restricted-imports': listaDePermissao([
             ...PERMITIDOS,
             ...NOS_TESTES,
             ...NOS_AUXILIARES,
           ]),
+        },
+      },
+      {
+        files: [`${INSTALACAO}/**/*.${ARQUIVOS}`],
+        linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'error' },
+        rules: {
+          'no-restricted-imports': listaDePermissao(
+            ['expo-file-system', DA_PASTA],
+            mensagemDaInstalacao,
+          ),
+          'no-restricted-syntax': semImportDinamico('na marca de instalação'),
         },
       },
     ];

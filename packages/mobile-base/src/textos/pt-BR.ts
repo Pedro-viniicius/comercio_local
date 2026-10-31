@@ -30,7 +30,6 @@ export const textos = {
     senhaVisivel: 'Senha visível',
     senhaOculta: 'Senha oculta',
     abrirLink: (texto: string) => `Abrir ${texto}`,
-    carregando: 'Carregando',
     enviando: 'Enviando…',
     // Prefixo lido antes da mensagem de erro do campo (o símbolo "!" não é lido).
     erroDoCampo: 'Erro',

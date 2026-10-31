@@ -55,28 +55,33 @@ beforeEach(() => {
   secureStoreFalso.reiniciar();
 });
 
-describe('limpeza da primeira abertura, falha e nova tentativa (S18)', () => {
-  it('se só a revogação pendente não for apagada, rejeita, não marca e a nova tentativa apaga as duas', async () => {
+describe('limpeza da primeira abertura, falha e nova tentativa (S18, S127)', () => {
+  it('se a revogação pendente não for gravada, rejeita, não marca, não mexe na sessão antiga, e a nova tentativa converte (S127)', async () => {
     secureStoreFalso.itens.set(CHAVE_DA_SESSAO, JSON.stringify(ANTIGA));
     secureStoreFalso.itens.set(CHAVE_DA_REVOGACAO_PENDENTE, JSON.stringify({ tokenAcesso: 'x' }));
-    secureStoreFalso.falhas.add(`apagar:${CHAVE_DA_REVOGACAO_PENDENTE}`);
+    secureStoreFalso.falhas.add(`gravar:${CHAVE_DA_REVOGACAO_PENDENTE}`);
     const marca = marcaEmMemoria(false);
     const { sessao, revogacaoPendente } = criarCofreDaSessao({ marca });
 
     await expect(revogacaoPendente.ler()).rejects.toThrow(/armazenamento seguro/);
     expect(marca.marcar).not.toHaveBeenCalled();
-    // A sessão antiga nunca é entregue enquanto a limpeza não termina.
+    // A sessão antiga nunca é entregue enquanto a preparação não termina, nem sai antes de o par
+    // estar na pendência.
     await expect(sessao.ler()).rejects.toThrow(/armazenamento seguro/);
-    expect(secureStoreFalso.chamadas.some((c) => c.metodo === 'ler')).toBe(false);
+    expect(secureStoreFalso.itens.get(CHAVE_DA_SESSAO)).toBe(JSON.stringify(ANTIGA));
 
     secureStoreFalso.falhas.clear();
     expect(await sessao.ler()).toBeNull();
-    expect(await revogacaoPendente.ler()).toBeNull();
-    expect(guardados()).toEqual([]);
+    expect(await revogacaoPendente.ler()).toEqual({
+      tokenAcesso: ANTIGA.tokenAcesso,
+      tokenRenovacao: ANTIGA.tokenRenovacao,
+      anteriores: [{ tokenAcesso: 'x' }],
+    });
+    expect(guardados()).toEqual([CHAVE_DA_REVOGACAO_PENDENTE]);
     expect(marca.marcar).toHaveBeenCalledTimes(1);
   });
 
-  it('gravar, ler e limpar falham juntos enquanto a limpeza falha, e nada é gravado', async () => {
+  it('gravar, ler e limpar falham juntos enquanto a limpeza falha, e nada da instalação nova é gravado', async () => {
     secureStoreFalso.itens.set(CHAVE_DA_SESSAO, JSON.stringify(ANTIGA));
     secureStoreFalso.falhas.add(`apagar:${CHAVE_DA_SESSAO}`);
     const { sessao, revogacaoPendente } = criarCofreDaSessao({ marca: marcaEmMemoria(false) });
@@ -94,8 +99,19 @@ describe('limpeza da primeira abertura, falha e nova tentativa (S18)', () => {
       'rejected',
       'rejected',
     ]);
-    expect(secureStoreFalso.chamadas.some((c) => c.metodo === 'gravar')).toBe(false);
-    // A sessão antiga continua lá, sem ser lida nem regravada por ninguém.
+    // Só a conversão do par antigo em revogação pendente foi gravada (S127): nem a sessão nova,
+    // nem a revogação que o teste pediu.
+    expect(
+      secureStoreFalso.chamadas
+        .filter((c) => c.metodo === 'gravar')
+        .map((c) => [c.chave, JSON.parse(c.valor ?? 'null') as unknown]),
+    ).toEqual([
+      [
+        CHAVE_DA_REVOGACAO_PENDENTE,
+        { tokenAcesso: ANTIGA.tokenAcesso, tokenRenovacao: ANTIGA.tokenRenovacao },
+      ],
+    ]);
+    // A sessão antiga continua lá, sem ser entregue nem regravada por ninguém.
     expect(secureStoreFalso.itens.get(CHAVE_DA_SESSAO)).toBe(JSON.stringify(ANTIGA));
   });
 

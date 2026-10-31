@@ -1,6 +1,6 @@
-import { raio, temaClaro } from '@bairrin/tokens';
-import { fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo } from 'react-native';
+import { espaco, raio, temaClaro } from '@bairrin/tokens';
+import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
+import { AccessibilityInfo, Dimensions } from 'react-native';
 import { ModalDeConfirmacao, type ModalDeConfirmacaoProps } from './ModalDeConfirmacao.tsx';
 
 const base: ModalDeConfirmacaoProps = {
@@ -58,9 +58,51 @@ describe('ModalDeConfirmacao', () => {
   it('o scrim usa `overlay.scrim` (48% de `neutral.900`) e o cartão, `radius.xl`', async () => {
     await render(<ModalDeConfirmacao {...base} testID="modal" />);
 
-    const cartao = screen.getByRole('heading').parent;
+    const cartao = screen.getByTestId('modal-de-confirmacao-cartao');
     expect(cartao).toHaveStyle({ borderRadius: raio.xl, backgroundColor: temaClaro.bg.surface });
-    expect(cartao?.parent).toHaveStyle({ backgroundColor: 'rgba(21, 25, 32, 0.48)' });
+    expect(cartao.parent).toHaveStyle({ backgroundColor: 'rgba(21, 25, 32, 0.48)' });
+  });
+
+  it('o conteúdo rola dentro de um cartão com altura máxima: fonte a 200% não corta os botões (D10)', async () => {
+    await render(<ModalDeConfirmacao {...base} />);
+
+    const rolagem = screen.getByTestId('modal-de-confirmacao-rolagem');
+    expect(rolagem).toBeOnTheScreen();
+    expect(screen.getByTestId('modal-de-confirmacao-cartao')).toHaveStyle({
+      maxHeight: Dimensions.get('window').height - espaco[4] * 2,
+    });
+    // Título, texto e botões ficam todos dentro da área rolável.
+    expect(within(rolagem).getByRole('heading')).toBeOnTheScreen();
+    expect(within(rolagem).getByRole('button', { name: 'Pedir cópia' })).toBeOnTheScreen();
+    expect(within(rolagem).getByRole('button', { name: 'Cancelar' })).toBeOnTheScreen();
+  });
+
+  it('o limite do cartão acompanha a altura da janela (janela baixa, com fonte a 200%) (D10)', async () => {
+    const original = Dimensions.get('window');
+    try {
+      await act(() => {
+        Dimensions.set({ window: { ...original, height: 320 } });
+      });
+      await render(<ModalDeConfirmacao {...base} />);
+      expect(screen.getByTestId('modal-de-confirmacao-cartao')).toHaveStyle({
+        maxHeight: 320 - espaco[4] * 2,
+      });
+    } finally {
+      Dimensions.set({ window: original });
+    }
+  });
+
+  it('com o cartão rolável os dois botões continuam acionáveis (D10)', async () => {
+    const aoConfirmar = jest.fn();
+    const aoCancelar = jest.fn();
+    await render(
+      <ModalDeConfirmacao {...base} aoConfirmar={aoConfirmar} aoCancelar={aoCancelar} />,
+    );
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Pedir cópia' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(aoConfirmar).toHaveBeenCalledTimes(1);
+    expect(aoCancelar).toHaveBeenCalledTimes(1);
   });
 
   it('o toque no fundo não fecha: só os botões decidem', async () => {
@@ -158,7 +200,7 @@ describe('ModalDeConfirmacao', () => {
     it('o cartão é um diálogo modal para o leitor de tela', async () => {
       await render(<ModalDeConfirmacao {...base} />);
 
-      const cartao = screen.getByRole('heading').parent;
+      const cartao = screen.getByTestId('modal-de-confirmacao-cartao');
       expect(cartao?.props.accessibilityViewIsModal).toBe(true);
       expect(cartao?.props.role).toBe('alertdialog');
     });

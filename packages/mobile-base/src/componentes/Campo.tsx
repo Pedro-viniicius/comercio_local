@@ -4,8 +4,9 @@
 // (`mensagemDoCampo`): o Campo só a mostra. Ao enviar com erros, quem monta a tela põe o foco no
 // primeiro campo inválido (`ref`) e anuncia o total (`textos.componentes.errosNoEnvio`).
 import { espaco, raio, tamanho, temaClaro } from '@bairrin/tokens';
-import { useEffect, useState, type Ref } from 'react';
+import { useCallback, useEffect, useRef, useState, type Ref } from 'react';
 import {
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -46,6 +47,10 @@ export interface CampoProps {
   /** Enter do teclado: envia ou vai ao próximo campo. */
   aoEnviar?: () => void;
   acaoDoTeclado?: ReturnKeyTypeOptions;
+  /** Limite de caracteres digitados (ex.: nome com 80). */
+  maxLength?: number;
+  /** Foco ao abrir a tela (use só quando o campo é a única tarefa dela). */
+  autoFocus?: boolean;
   /** Para a tela pôr o foco no primeiro campo com erro. */
   ref?: Ref<TextInputInstance>;
   testID?: string;
@@ -86,6 +91,8 @@ function propriedadesDoTipo(
     case 'senha':
       return {
         secureTextEntry: !senhaVisivel,
+        // Senha à mostra no Android: `visible-password` desliga a aprendizagem do teclado (S129).
+        ...(senhaVisivel && Platform.OS === 'android' ? { keyboardType: 'visible-password' } : {}),
         autoCapitalize: 'none',
         autoCorrect: false,
         spellCheck: false,
@@ -113,9 +120,21 @@ export function Campo({
   somenteLeitura = false,
   aoEnviar,
   acaoDoTeclado,
+  maxLength,
+  autoFocus,
   ref,
   testID,
 }: CampoProps) {
+  // Ref interna (o rótulo leva o foco ao campo) repassada também à ref da tela.
+  const refDaEntrada = useRef<TextInputInstance | null>(null);
+  const refDoCampo = useCallback(
+    (entrada: TextInputInstance | null) => {
+      refDaEntrada.current = entrada;
+      if (typeof ref === 'function') ref(entrada);
+      else if (ref) ref.current = entrada;
+    },
+    [ref],
+  );
   const foco = useFoco();
   const focoDoBotao = useFoco();
   const [senhaVisivel, setSenhaVisivel] = useState(false);
@@ -147,13 +166,15 @@ export function Campo({
   return (
     <View style={estilos.campo}>
       {/* O nome acessível do campo é o `accessibilityLabel`; o rótulo visível não se repete. */}
-      <Text
+      {/* Tocar no rótulo leva o foco ao campo; para o leitor de tela o rótulo não existe. */}
+      <Pressable
+        accessible={false}
         accessibilityElementsHidden
         importantForAccessibility="no"
-        style={[estilos.rotulo, desabilitado && estilos.rotuloDesabilitado]}
+        onPress={() => refDaEntrada.current?.focus()}
       >
-        {rotulo}
-      </Text>
+        <Text style={[estilos.rotulo, desabilitado && estilos.rotuloDesabilitado]}>{rotulo}</Text>
+      </Pressable>
       <View
         style={[
           estilos.caixa,
@@ -164,8 +185,10 @@ export function Campo({
         ]}
       >
         <TextInput
-          ref={ref}
+          ref={refDoCampo}
           testID={testID}
+          maxLength={maxLength}
+          autoFocus={autoFocus}
           {...propriedadesDoTipo(tipo, preenchimento, senhaVisivel)}
           value={valor}
           onChangeText={aoMudar}

@@ -1,10 +1,22 @@
 import { tamanho, temaClaro } from '@bairrin/tokens';
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { StyleSheet, Text, type StyleProp, type ViewStyle } from 'react-native';
+import { PixelRatio, StyleSheet, Text, type StyleProp, type ViewStyle } from 'react-native';
 import { BarraSuperior, textoDoSelo } from './BarraSuperior.tsx';
 import { anelDeFoco, sombraDeElevacao } from './estilos.ts';
 
+beforeEach(() => {
+  // O Jest do React Native devolve escala 2 por padrão; os testes escolhem a que querem.
+  jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(1);
+});
+afterEach(() => jest.restoreAllMocks());
+
 describe('BarraSuperior', () => {
+  it('com fonte do sistema ampliada o título ganha uma segunda linha (D13)', async () => {
+    jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(2);
+    await render(<BarraSuperior titulo="Termos de Uso do Bairrin" />);
+    expect(screen.getByRole('heading').props.numberOfLines).toBe(2);
+  });
+
   it('mostra o título como cabeçalho, em uma linha com reticências; o texto completo é o nome', async () => {
     const titulo =
       'Termos de Uso do Bairrin e muito mais texto que não cabe numa linha só da barra';
@@ -127,6 +139,27 @@ describe('BarraSuperior', () => {
         />,
       );
       expect(screen.getByRole('button', { name: 'Notificações, 99+' })).toBeOnTheScreen();
+    });
+
+    it('o selo usa `minHeight`, não altura fixa, e limita a fonte (D12)', async () => {
+      await render(
+        <BarraSuperior
+          titulo="Pedidos"
+          acoes={[
+            {
+              rotulo: 'Notificações',
+              conteudo: <Text>n</Text>,
+              aoPressionar: jest.fn(),
+              selo: 100,
+            },
+          ]}
+        />,
+      );
+      const texto = screen.getByText('99+', { includeHiddenElements: true });
+      const selo = StyleSheet.flatten(texto.parent?.props.style as StyleProp<ViewStyle>);
+      expect(selo?.minHeight).toBe(20);
+      expect(selo?.height).toBeUndefined();
+      expect(texto.props.maxFontSizeMultiplier).toBe(1.3);
     });
 
     it('selo zero ou ausente não aparece', async () => {

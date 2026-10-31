@@ -18,14 +18,18 @@ function textoDaChave(raiz: object, campo: string, codigo: string): string | und
   return typeof texto === 'string' && texto.trim() !== '' ? texto : undefined;
 }
 
+/** Telas com texto próprio em `textos.erroPorTela`: o compilador recusa um nome errado (R15). */
+export type TelaComTextoProprio = keyof typeof textos.erroPorTela;
+
 /** `tela` (opcional) escolhe o texto próprio da tela em `textos.erroPorTela`, antes do geral. */
 export function mensagemDoCampo(
   campo: string,
   codigo: string,
   motivo: string,
-  tela?: string,
+  tela?: TelaComTextoProprio,
 ): string {
   if (tela !== undefined) {
+    // O tipo não vale em tempo de execução: o nome continua conferido como chave própria.
     const daTela = propriedadeDeTexto(textos.erroPorTela, tela);
     if (typeof daTela === 'object' && daTela !== null) {
       const texto = textoDaChave(daTela, campo, codigo);

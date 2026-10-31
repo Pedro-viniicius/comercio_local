@@ -5,7 +5,16 @@
 // do Android cancela. Ao abrir, o leitor de tela vai para o título.
 import { espaco, raio, temaClaro } from '@bairrin/tokens';
 import { useEffect, useRef } from 'react';
-import { AccessibilityInfo, Modal, StyleSheet, Text, View, type HostInstance } from 'react-native';
+import {
+  AccessibilityInfo,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type HostInstance,
+} from 'react-native';
 import { Botao } from './Botao.tsx';
 import { corComOpacidade, estiloDeTexto, sombraDeElevacao } from './estilos.ts';
 
@@ -44,6 +53,9 @@ export function ModalDeConfirmacao({
   testID,
 }: ModalDeConfirmacaoProps) {
   const refDoTitulo = useRef<HostInstance>(null);
+  // Com a fonte do sistema ampliada o cartão passa da janela: ele rola em vez de cortar os botões.
+  const { height: alturaDaJanela } = useWindowDimensions();
+  const alturaMaxima = Math.max(alturaDaJanela - espaco[4] * 2, 0);
 
   useEffect(() => {
     if (visivel && refDoTitulo.current) {
@@ -67,28 +79,35 @@ export function ModalDeConfirmacao({
     >
       <View style={estilos.fundo}>
         <View
+          testID="modal-de-confirmacao-cartao"
           accessibilityViewIsModal
           role="alertdialog"
-          style={[estilos.cartao, sombraDeElevacao(3)]}
+          style={[estilos.cartao, sombraDeElevacao(3), { maxHeight: alturaMaxima }]}
         >
-          <Text ref={refDoTitulo} role="heading" style={estilos.titulo}>
-            {titulo}
-          </Text>
-          <Text style={estilos.texto}>{texto}</Text>
-          <View style={estilos.botoes}>
-            <Botao
-              rotulo={rotuloConfirmar}
-              variante={varianteDeConfirmar}
-              aoPressionar={aoConfirmar}
-              carregando={carregando}
-            />
-            <Botao
-              rotulo={rotuloCancelar}
-              variante={graveDestrutiva ? 'primario' : 'terciario'}
-              aoPressionar={aoCancelar}
-              desabilitado={carregando}
-            />
-          </View>
+          <ScrollView
+            testID="modal-de-confirmacao-rolagem"
+            contentContainerStyle={estilos.conteudo}
+            bounces={false}
+          >
+            <Text ref={refDoTitulo} role="heading" style={estilos.titulo}>
+              {titulo}
+            </Text>
+            <Text style={estilos.texto}>{texto}</Text>
+            <View style={estilos.botoes}>
+              <Botao
+                rotulo={rotuloConfirmar}
+                variante={varianteDeConfirmar}
+                aoPressionar={aoConfirmar}
+                carregando={carregando}
+              />
+              <Botao
+                rotulo={rotuloCancelar}
+                variante={graveDestrutiva ? 'primario' : 'terciario'}
+                aoPressionar={aoCancelar}
+                desabilitado={carregando}
+              />
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -106,11 +125,10 @@ const estilos = StyleSheet.create({
   cartao: {
     width: '100%',
     maxWidth: 400,
-    gap: espaco[3],
-    padding: espaco[6],
     borderRadius: raio.xl,
     backgroundColor: temaClaro.bg.surface,
   },
+  conteudo: { gap: espaco[3], padding: espaco[6] },
   titulo: { ...estiloDeTexto('titleSm', 'semibold'), color: temaClaro.text.primary },
   texto: { ...estiloDeTexto('body'), color: temaClaro.text.secondary },
   botoes: { gap: espaco[2], marginTop: espaco[2] },

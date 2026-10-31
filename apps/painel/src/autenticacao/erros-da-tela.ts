@@ -3,7 +3,7 @@
 // erro: o `ErroDeApi` só traz status, código e campos, sem corpo nem URL.
 import { ehErroDeApi } from '@bairrin/cliente-api';
 import { camposDoErroZod, type CampoDoProblema, type z } from '@bairrin/contratos';
-import { mensagemDoCampo } from '../textos/mensagem-do-campo.ts';
+import { mensagemDoCampo, type TelaComTextoProprio } from '../textos/mensagem-do-campo.ts';
 
 export type Falha =
   /** 400 com `campos`: fica na tela, com o erro em cada campo. */
@@ -49,7 +49,7 @@ export interface ErrosParaATela<Campo extends string> {
 export function errosParaATela<Campo extends string>(
   campos: readonly CampoDoProblema[],
   visiveis: readonly Campo[],
-  tela?: string,
+  tela?: TelaComTextoProprio,
 ): ErrosParaATela<Campo> {
   const erros: ErrosDosCampos<Campo> = {};
   let foraDaTela = false;

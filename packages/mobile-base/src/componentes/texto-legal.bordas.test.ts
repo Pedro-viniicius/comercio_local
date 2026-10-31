@@ -3,16 +3,22 @@
 import { blocosDoTextoLegal, formatarDataLegal, trechosDaLinha } from './texto-legal.ts';
 
 describe('formatarDataLegal, bordas', () => {
-  // Q38 (baixa): reproduz o bug e falha de propósito até a correção; troque `it.failing` por `it`.
-  it.failing(
-    'data impossível (31/02, 31/04, 29/02 de ano comum) não vira "vigente desde": devolve null',
-    () => {
-      const impossiveis = ['2026-02-31', '2026-04-31', '2027-02-29', '2026-06-31', '2100-02-29'];
-      expect(impossiveis.map((data) => formatarDataLegal(data))).toEqual(
-        impossiveis.map(() => null),
-      );
-    },
-  );
+  // Q38: corrigido.
+  it('data impossível (31/02, 31/04, 29/02 de ano comum) não vira "vigente desde": devolve null', () => {
+    const impossiveis = ['2026-02-31', '2026-04-31', '2027-02-29', '2026-06-31', '2100-02-29'];
+    expect(impossiveis.map((data) => formatarDataLegal(data))).toEqual(impossiveis.map(() => null));
+  });
+
+  it('data impossível com hora também devolve null, em vez de rolar para o mês seguinte (Q38)', () => {
+    for (const valor of [
+      '2026-02-31T10:00:00Z',
+      '2026-04-31T12:00:00-03:00',
+      '2027-02-29T00:00:00Z',
+    ]) {
+      expect(formatarDataLegal(valor)).toBeNull();
+    }
+    expect(formatarDataLegal('2028-02-29T12:00:00Z')).toBe('29/02/2028');
+  });
 
   it('ano bissexto: 29/02/2028 existe', () => {
     expect(formatarDataLegal('2028-02-29')).toBe('29/02/2028');
