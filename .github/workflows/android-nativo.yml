@@ -50,12 +50,13 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - name: Java 17 com cache do Gradle
+      # Sem `cache: gradle`: a chave do cache vem dos arquivos do Gradle, que só existem depois do
+      # `expo prebuild` (a pasta android/ não está no git), e o setup-java falha sem eles.
+      - name: Java 17
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Instalar dependências
         run: pnpm install --frozen-lockfile
