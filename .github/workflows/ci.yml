@@ -75,16 +75,14 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # CA-F6: entram sozinhos quando os apps existirem (apps/consumidor e apps/lojista ainda não
-      # foram criados: aguardam o Expo SDK 58 estável).
+      # CA-F6: os dois apps Expo (SDK 58). Sem atalho: se a pasta ou o config de um app sumir, o
+      # passo falha em vez de passar em silêncio.
       - name: Expo export do consumidor
-        if: hashFiles('apps/consumidor/app.config.ts') != ''
         run: |
           pnpm --filter consumidor exec expo export --platform android
           pnpm --filter consumidor exec expo export --platform ios
 
       - name: Expo export do lojista
-        if: hashFiles('apps/lojista/app.config.ts') != ''
         run: |
           pnpm --filter lojista exec expo export --platform android
           pnpm --filter lojista exec expo export --platform ios

@@ -238,4 +238,4 @@ Os fakes em memória ficam em `apps/api/test/fakes/identidade/`. Os testes de in
 
 - Nenhum módulo registra `FonteDePendencias` ainda; o registro vazio responde sem pendências.
 - O relay da outbox desfaz o lote inteiro se um evento falha sempre (poison pill): os e-mails de verificação e de recuperação param até alguém corrigir. Fica obrigatório antes do primeiro deploy de produção (plano 01b, riscos).
-- Os apps Expo ainda não existem: a sessão no SecureStore e a limpeza no logout vêm na trilha mobile (`packages/mobile-base`, plano 01b, etapa 20b).
+- Os apps Expo existem, mas só com a tela de estado da API: a sessão no SecureStore e a limpeza no logout vêm na trilha mobile (`packages/mobile-base`, plano 01b, etapa 20b).

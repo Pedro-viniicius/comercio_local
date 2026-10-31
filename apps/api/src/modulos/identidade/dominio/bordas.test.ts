@@ -109,7 +109,8 @@ describe('freio de login: fronteiras e rodapés (CA-04)', () => {
         }
       }
     }
-  });
+    // 60 mil passos: 0,6 s sozinho, mais de 5 s com a máquina ocupada (o padrão do Vitest).
+  }, 30_000);
 
   it('propriedade: nunca sobra bloqueio definitivo, mesmo depois de milhares de falhas seguidas', () => {
     const freio = BloqueioDeLogin.novo('k', 'email', AGORA);

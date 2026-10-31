@@ -210,7 +210,8 @@ describe('CA5: falso positivo em senha aleatória (lista completa)', () => {
       }
     }
     expect(recusadas(Array.from({ length: 200 }, () => frase(2, ' '))).length).toBe(200);
-  });
+    // 30 mil senhas: 1,5 a 2 s sozinho, mais de 5 s com a máquina ocupada (o padrão do Vitest).
+  }, 60_000);
 
   it('senhas fortes que um usuário de verdade usaria passam', () => {
     for (const senha of [

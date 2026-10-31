@@ -6,4 +6,6 @@
 - [Grupo C: painel e cliente-api (5c, 15)](grupo-c-painel-e-cliente-api.md) — R1: Q22/Q23; R2: Q22/Q23 fechados, Q25 aberto; R3: Q25/R8, R10, outra_aba provados; testes, mutação, Chrome/CSP
 - [Etapa 13 do 01b: assinantes, tarefas, seed:admin](etapa-13-assinantes-tarefas.md) — R1-R3: Q26-Q29 fechados, APROVADO; testes, mutação, colisão de banco com outros agentes
 - [Etapa 16 do 01b: HTTP de identidade (grupo E)](etapa-16-http-identidade.md) — R1: APROVADO COM RESSALVAS, Q30 baixo, testes novos, mutação 26/26, armadilhas do supertest e do migracao
+- [M1: apps Expo e mobile-base (8/9 do 01a, 1b do 01b)](grupo-m1-apps-expo-mobile-base.md) — R1: Q33-Q34 baixos; R2: tudo provado, mutação; Jest/Expo, mutação em cópia, lint de src/sessao, bundle, flakiness do pnpm test
 - [Etapa 19 do 01b: conta, privacidade, admin/conta (grupo F)](etapa-19-conta-privacidade.md) — R1: Q31/Q32 baixos, corrida real do download, causa do MaxListeners, mutação 11/11; R2: Q31 e S113 provados, mutação 10/10, armadilha do freio compartilhado
+- [ENOTEMPTY do vitest e cota do /tmp](investigacao-enotempty-vitest.md) — causa (cache único + lockfile novo), sonda, correção sugerida, EDQUOT

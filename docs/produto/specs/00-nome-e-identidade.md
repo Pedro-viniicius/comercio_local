@@ -384,6 +384,34 @@ Nome aprovado pelo dono em 2026-10-16. Escreve-se **Bairrin** em texto corrido (
 </svg>
 ```
 
+**Estado da entrega (2026-10-27).** Os SVGs de `assets/brand/` estão prontos e valem mais que os rascunhos acima, com três diferenças deliberadas: (1) o wordmark e o slogan são **caminhos (outline)** desenhados a partir do Noto Sans Bold (licença OFL, permite incorporar); o peso é 700, o mais próximo de semibold disponível na máquina, e não há `<text>` nem fonte; (2) sem `width`/`height` no `<svg>`, só `viewBox`, para o `SvgXml` e o `<img>` escalarem pelo tamanho que o componente pedir (o logo horizontal é `0 0 197 66`; o empilhado, `0 0 160 120`); (3) os ícones seguem a geometria dos rascunhos (símbolo a 90%, dentro da zona segura).
+
+**Ícone do app do lojista (variação, decisão de 2026-10-27).** Mesmo símbolo, mesma posição e mesmo ponto verde; muda a cor do fundo e a do toldo, para o lojista achar o app certo na tela inicial sem ler o nome (o nome do app já é "Bairrin Lojista").
+
+| Elemento | Consumidor | Lojista |
+|---|---|---|
+| Fundo (quadrado iOS e camada de fundo do Android) | `blue.600` #1F5BD1 | `blue.900` #18336B |
+| Pino | branco | branco |
+| Toldo | `blue.700` #1A49AB com listras brancas | `blue.600` #1F5BD1 com listras brancas |
+| Ponto "aberta" | `green.500` | `green.500` |
+| Mono (Android 13+) | `bairrin-icone-android-mono.svg` | o mesmo arquivo (um tema de uma cor só apaga a diferença) |
+
+Contraste e legibilidade: pino branco sobre #18336B = 12,18:1; toldo `blue.600` sobre o pino branco = 6,04:1; ponto `green.500` sobre o pino branco = 3,55:1 (componente, mais que os 3:1 exigidos). O fundo escuro e o claro do consumidor diferem em luminosidade (razão de cerca de 2:1 entre os dois fundos) e em tom, então se distinguem mesmo para quem vê pouca cor, e a diferença não depende só de matiz. A 48 px o pino mede cerca de 28 px de altura e a forma (pino com ponto) continua nítida nos dois; os detalhes do toldo (listras de 3 px) somem, e tudo bem, porque a identificação vem da silhueta e do fundo. Alternativa descartada: selo (pontinho ou ferramenta) num canto, porque a 48 px ele vira mancha, e as máscaras do Android cortam os cantos. Descartado também fundo verde: a spec proíbe o verde no fundo do ícone.
+
+Arquivos do lojista: `bairrin-lojista-icone-ios-1024.svg`, `bairrin-lojista-icone-android-fundo.svg`, `bairrin-lojista-icone-android-frente.svg`.
+
+**PNG que o Expo e as lojas precisam** (gerados por `assets/brand/gerar-png.sh`, que usa o Chrome headless e o Pillow já instalados, sem dependência nova; saem em `assets/brand/png/`):
+
+| PNG | Tamanho | Origem | Observação |
+|---|---|---|---|
+| `icone-ios-1024.png` e `lojista-icone-ios-1024.png` | 1024×1024 | `-icone-ios-1024.svg` | RGB, sem canal alfa (a App Store rejeita transparência) |
+| `icone-android-frente-1024.png` e `lojista-icone-android-frente-1024.png` | 1024×1024 | `-android-frente.svg` | com transparência; o fundo vai como cor (`backgroundColor`: #1F5BD1 consumidor, #18336B lojista) |
+| `icone-android-mono-1024.png` | 1024×1024 | `-android-mono.svg` | transparente; serve aos dois apps |
+| `splash-1024.png` | 1024×1024 | `bairrin-splash.svg` | fundo #18336B incluído; logo e slogan cabem num círculo de 683 px, a área que o Android 12+ não corta |
+| `icone-play-512.png` e `lojista-icone-play-512.png` | 512×512 | `-icone-ios-1024.svg` | fichas da Google Play |
+
+Ainda não gerados (painel web): `favicon.ico` (16/32/48) e `apple-touch-icon.png` (180), a partir de `bairrin-favicon-32.svg` e do ícone completo.
+
 **Assets a gerar (lista para o dev):**
 
 | Arquivo | Uso | Texto alternativo |
@@ -395,7 +423,7 @@ Nome aprovado pelo dono em 2026-10-16. Escreve-se **Bairrin** em texto corrido (
 | `assets/brand/bairrin-icone-android-frente.svg`, `-fundo.svg`, `-mono.svg` | Ícone adaptativo e temático do Android | não se aplica |
 | `assets/brand/bairrin-icone-play-512.png` | Ficha da Google Play | não se aplica |
 | `assets/brand/bairrin-favicon-32.svg`, `favicon.ico`, `apple-touch-icon.png` | Painel web e página de deep link | não se aplica |
-| `assets/brand/bairrin-splash.svg` | Splash: fundo `blue.900`, logo empilhado branco + slogan em `blue.200` (7,81:1) | "Bairrin, lojas do seu bairro" |
+| `assets/brand/bairrin-splash.svg` (1024×1024) | Splash: fundo `blue.900`, logo empilhado branco + slogan em `blue.200` (7,81:1) | "Bairrin, lojas do seu bairro" |
 
 O caminho `assets/brand/` é sugestão; o arquiteto pode ajustar à estrutura da stack, mantendo os nomes de arquivo.
 

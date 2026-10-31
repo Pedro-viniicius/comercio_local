@@ -10,40 +10,37 @@ Marketplace mobile do comércio local: o consumidor compra de lojas da própria 
 
 ## Estado da fundação
 
-Plano `docs/produto/planos/01a-fundacao-repositorio.md`, situação em 2026-10-16.
+Plano `docs/produto/planos/01a-fundacao-repositorio.md`, situação em 2026-10-16, com os apps Expo atualizados em 2026-10-27.
 
-| Parte                                                                          | Situação                                                                    |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| Raiz do monorepo, lint, typecheck, testes                                      | Pronta                                                                      |
-| `infra/` (Postgres de desenvolvimento e de teste, Mailpit)                     | Pronta                                                                      |
-| `apps/api` (HTTP, worker, banco, outbox, auditoria, e-mail)                    | Pronta (sem módulos de negócio; eles vêm a partir do plano 01b)             |
-| `packages/contratos`, `packages/cliente-api`, `packages/tokens`                | Prontos                                                                     |
-| `apps/painel`                                                                  | Mínimo pronto (página com o estado da API)                                  |
-| `apps/consumidor`, `apps/lojista`                                              | **Ainda não criados**: só existe o `.env.example` (ver o README de cada um) |
-| Hospedagem do painel (`Dockerfile`, `Caddyfile` e `fly.toml` em `apps/painel`) | Pronta, sem publicar (etapa 15)                                             |
-| CI, `Dockerfile` e `fly.toml` da API, Sentry                                   | Prontos, sem publicar (etapa 13)                                            |
-| `packages/mobile-base`                                                         | Futuro (plano 01b)                                                          |
-
-Um aviso de hoje, que some sozinho com o tempo:
-
-- O Expo SDK 58 estável (`expo` 58.0.11, React Native 0.88.0) fica elegível no `minimumReleaseAge` em 2026-10-19. Até lá os apps não podem ser criados.
+| Parte                                                                          | Situação                                                                         |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Raiz do monorepo, lint, typecheck, testes                                      | Pronta                                                                           |
+| `infra/` (Postgres de desenvolvimento e de teste, Mailpit)                     | Pronta                                                                           |
+| `apps/api` (HTTP, worker, banco, outbox, auditoria, e-mail)                    | Pronta (sem módulos de negócio; eles vêm a partir do plano 01b)                  |
+| `packages/contratos`, `packages/cliente-api`, `packages/tokens`                | Prontos                                                                          |
+| `apps/painel`                                                                  | Mínimo pronto (página com o estado da API)                                       |
+| `apps/consumidor`, `apps/lojista`                                              | Mínimos prontos (Expo SDK 58, tela com o estado da API; ver o README de cada um) |
+| Hospedagem do painel (`Dockerfile`, `Caddyfile` e `fly.toml` em `apps/painel`) | Pronta, sem publicar (etapa 15)                                                  |
+| CI, `Dockerfile` e `fly.toml` da API, Sentry                                   | Prontos, sem publicar (etapa 13)                                                 |
+| `packages/mobile-base`                                                         | Esqueleto (dependências e lint; sessão e telas vêm no plano 01b)                 |
 
 ## Estrutura
 
 ```
 apps/api/            API NestJS (src/main.ts) e worker (src/worker.ts)
-apps/consumidor/     app Expo do consumidor (futuro; hoje só .env.example)
-apps/lojista/        app Expo do lojista (futuro; hoje só .env.example)
+apps/consumidor/     app Expo do consumidor (Expo Router em src/app)
+apps/lojista/        app Expo do lojista (Expo Router em src/app)
 apps/painel/         painel do administrador, React + Vite
 packages/contratos/  @bairrin/contratos: esquemas zod compartilhados
 packages/cliente-api/ @bairrin/cliente-api: cliente HTTP tipado
 packages/tokens/     @bairrin/tokens: tokens de design
+packages/mobile-base/ @bairrin/mobile-base: base dos apps Expo (esqueleto)
 infra/               docker-compose.yml e papéis do Postgres local
 scripts/             verificar-migracoes.mjs e seus testes
 docs/                adr/, operacao/, produto/ e CONVENCOES.md
 ```
 
-Também previstos, ainda sem pasta: `packages/mobile-base` (sessão, fila offline e telas comuns dos dois apps) e `assets/brand`.
+`packages/mobile-base` receberá a sessão, a fila offline e as telas comuns dos dois apps (plano 01b). Ainda sem pasta: `assets/brand`.
 
 ## Pré-requisitos
 
@@ -87,14 +84,14 @@ O script `pnpm --filter api migrar` faz os dois passos na ordem do deploy (é o 
 
 ## Rodar cada parte
 
-| Parte          | Comando                       | Observação                                                          |
-| -------------- | ----------------------------- | ------------------------------------------------------------------- |
-| API            | `pnpm --filter api dev`       | Compila, observa mudanças e sobe em `http://localhost:3000`         |
-| Worker         | `pnpm --filter api worker`    | Relay da outbox, assinantes e limpeza; precisa do pg-boss migrado   |
-| Painel         | `pnpm --filter painel dev`    | Vite em `http://localhost:5173` (origem já liberada no CORS da API) |
-| Consumidor     | futuro                        | Ver `apps/consumidor/README.md`                                     |
-| Lojista        | futuro                        | Ver `apps/lojista/README.md`                                        |
-| E-mails de dev | abrir `http://127.0.0.1:8025` | Mailpit                                                             |
+| Parte          | Comando                          | Observação                                                          |
+| -------------- | -------------------------------- | ------------------------------------------------------------------- |
+| API            | `pnpm --filter api dev`          | Compila, observa mudanças e sobe em `http://localhost:3000`         |
+| Worker         | `pnpm --filter api worker`       | Relay da outbox, assinantes e limpeza; precisa do pg-boss migrado   |
+| Painel         | `pnpm --filter painel dev`       | Vite em `http://localhost:5173` (origem já liberada no CORS da API) |
+| Consumidor     | `pnpm --filter consumidor start` | Expo; ver `apps/consumidor/README.md` (endereço da API, emulador)   |
+| Lojista        | `pnpm --filter lojista start`    | Expo; ver `apps/lojista/README.md`                                  |
+| E-mails de dev | abrir `http://127.0.0.1:8025`    | Mailpit                                                             |
 
 Conferir a API: `curl http://localhost:3000/v1/saude` e `curl http://localhost:3000/v1/saude/pronto` (este consulta o banco).
 
@@ -106,7 +103,7 @@ Conta única por e-mail, com os perfis `consumidor`, `lojista` e `admin`. O mesm
 - **Renovação:** token opaco rotativo, guardado no servidor só como HMAC. Nos apps dura 30 dias deslizantes e vai no corpo; no painel vai em cookie `HttpOnly; Secure; SameSite=Strict` (`bairrin_renovacao`), com 30 minutos de inatividade e 12 horas no máximo, conferidos no servidor. Logout e troca de senha revogam a sessão no servidor na hora: a renovação deixa de valer, e o token de acesso já emitido cai na hora em `/v1/admin` e nas rotas com `@ConfereSessao()` (dados da conta e cópia dos dados); nas demais, ele vale até completar os 15 minutos. A exclusão da conta também revoga as sessões e desativa a conta, e o token de acesso cai na hora em qualquer rota.
 - **Admin:** senha e depois código do app autenticador (TOTP). A conta admin só pede a própria exclusão pelo painel, com o segundo fator (S113). Quem ainda não tem 2FA o configura antes de qualquer outra coisa, no próprio painel. Quem perde o celular e os códigos de recuperação usa a CLI de reconfiguração (`pnpm --filter api reconfigurar-segundo-fator`).
 - **API e painel:** `packages/cliente-api/README.md` (renovação em 401, fila única, revogação pendente) e `apps/painel/README.md` (telas de entrada, inatividade e várias abas).
-- **Apps Expo:** guardam a sessão no SecureStore e limpam tudo no logout; essa parte fica em `packages/mobile-base/README.md`, que **ainda não existe** e vem na trilha mobile (plano 01b, etapa 20b).
+- **Apps Expo:** guardam a sessão no SecureStore e limpam tudo no logout; essa parte ficará em `packages/mobile-base/README.md`, hoje um esqueleto; o texto completo vem na trilha mobile (plano 01b, etapa 20b).
 
 Para ter um admin em desenvolvimento, com o banco migrado, o `seed` rodado (grava os termos e a política que o cadastro exige) e a API e o worker no ar:
 
@@ -139,7 +136,7 @@ pnpm --filter api test:integracao -- outbox        # só os arquivos *outbox*.in
 pnpm --filter painel exec vitest run src/App.test.tsx
 ```
 
-Os apps Expo usarão `pnpm --filter <app> exec jest <caminho>` quando existirem.
+Os apps Expo usam o Jest (`jest-expo`): `pnpm --filter consumidor exec jest src/telas/EstadoDaApi.test.tsx` (o mesmo vale para `lojista` e `@bairrin/mobile-base`).
 
 Os testes de integração apagam e recriam os schemas do Postgres de teste (porta 5433) a cada execução; nunca apontam para o banco de desenvolvimento.
 
@@ -161,7 +158,7 @@ Nenhum serviço pago é contratado até o app ficar pronto (decisão do dono), e
 
 - Painel: `apps/painel/Dockerfile` (build do Vite servido pelo Caddy, sem root), `apps/painel/Caddyfile` (CSP estrita e HSTS) e `apps/painel/fly.toml`. Detalhes em `apps/painel/README.md`.
 - API: `apps/api/Dockerfile` (imagem sem root) e `apps/api/fly.toml` (processos `app` e `worker`, migração no `release_command` `node --run migrar`). Primeiro deploy: `fly deploy -c apps/api/fly.toml --ha=false`. O Sentry entra quando houver `SENTRY_DSN`. Detalhes em `apps/api/README.md` e no checklist de deploy.
-- CI: `.github/workflows/ci.yml` (os comandos de verificação, `pnpm audit` bloqueante, integração e build em todo PR) e `.github/workflows/android-nativo.yml` (build Android na `main`, pulado enquanto os apps não existem). Dependências: `.github/dependabot.yml`.
+- CI: `.github/workflows/ci.yml` (os comandos de verificação, `pnpm audit` bloqueante, integração e build em todo PR) e `.github/workflows/android-nativo.yml` (build Android nativo na `main`; o `expo export` dos dois apps roda em todo PR). Os dois passos dos apps não têm atalho: se a pasta ou o `app.config.ts` de um app sumir, o CI falha. Dependências: `.github/dependabot.yml`.
 - Esses arquivos são a fonte da verdade; este resumo só aponta para eles.
 
 ## Documentação

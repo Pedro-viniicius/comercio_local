@@ -130,7 +130,7 @@ Vale para produção e homologação.
 
 ## 8. Apps Expo (consumidor e lojista)
 
-Os apps ainda não existem; esta seção vale quando existirem.
+Os apps existem (`apps/consumidor` e `apps/lojista`, Expo SDK 58) e hoje só mostram o estado da API. Os identificadores abaixo já estão em `app.config.ts`. O `eas.json` de cada app tem os perfis `development`, `preview` e `production`; `preview` e `production` já fixam `EXPO_PUBLIC_API_URL=https://api.bairrin.com.br`. Os apps ainda não têm `expo-updates` (P2 de `docs/produto/decisoes.md`: sem EAS Update até haver o plano pago); a assinatura de código abaixo continua obrigatória antes de publicar a primeira atualização.
 
 - [ ] Identificadores definitivos: "Bairrin", `br.com.bairrin.consumidor`, scheme `bairrin`; "Bairrin Lojista", `br.com.bairrin.lojista`, scheme `bairrin-lojista`. Não mudam depois de publicados.
 - [ ] `EXPO_PUBLIC_API_URL` aponta para `https://api.bairrin.com.br`. Nenhuma variável `EXPO_PUBLIC_*` leva segredo.

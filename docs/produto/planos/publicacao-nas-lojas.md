@@ -1,7 +1,7 @@
 # Plano técnico: publicação automatizada nas lojas (App Store e Google Play)
 - Brief: não há. O pedido do dono (2026-10-16) foi repassado pelo lead: "Automatizar o envio do aplicativo para a Apple Store e a Play Store."
 - Data: 2026-10-16 (revisado no mesmo dia com a rodada 1 do `seguranca`: S37 a S45)
-- Começa depois das etapas 8 e 9 do `01a-fundacao-repositorio.md` (apps Expo, previstas para 2026-10-19).
+- Começa depois das etapas 8 e 9 do `01a-fundacao-repositorio.md` (apps Expo, previstas para 2026-10-19; feitas em 2026-10-27).
 
 ## Objetivo e critérios de aceite
 Uma tag ou um disparo manual gera o build de release de cada app e o envia à trilha de testes de cada loja. A promoção para produção continua manual. Tudo o que não depende de pagamento fica pronto agora. Numeração global: o maior CA em `docs/produto/briefs/` e `docs/produto/planos/` é o CA-110 (`06-entregas-e-notificacoes.md:47`); os CA-F1 a F9 do 01a são uma série à parte.
@@ -26,7 +26,7 @@ Uma tag ou um disparo manual gera o build de release de cada app e o envia à tr
 - CA-121 — Nenhum job do GitHub Actions roda em macOS. O `android-nativo.yml` só roda quando muda algo em `apps/consumidor`, `apps/lojista`, `packages/` ou no lockfile.
 
 ## Contexto atual
-- Os apps ainda não existem: `apps/consumidor` e `apps/lojista` só têm `.env.example` e README (`apps/consumidor/README.md:5-9`). A etapa 8 do 01a cria o `app.config.ts`, o `eas.json` (perfis development, preview e production) e o jest (`01a-fundacao-repositorio.md:62-63`).
+- Os apps ainda não existem: `apps/consumidor` e `apps/lojista` só têm `.env.example` e README (`apps/consumidor/README.md:5-9`). A etapa 8 do 01a cria o `app.config.ts`, o `eas.json` (perfis development, preview e production) e o jest (`01a-fundacao-repositorio.md:62-63`). Atualização de 2026-10-27: os dois apps existem, com `app.config.ts` e `eas.json` dos três perfis e sem `expo-updates`.
 - Identificadores definitivos: `br.com.bairrin.consumidor` e `br.com.bairrin.lojista` (`docs/adr/0002-dois-apps-consumidor-e-lojista.md:13`). As releases dos dois apps são independentes (`:21`).
 - CI: o `ci.yml` roda em PR e na `main` sem segredos (`.github/workflows/ci.yml:1-4`, `:9-12`). O `concurrency` agrupa por PR ou por `github.ref` (`:17-20`). O job `auditoria` já usa `package-manager-cache: false` (`:110-118`). O `ci.yml` faz o `expo export` dos apps quando eles existirem (`:78-90`). O `android-nativo.yml` roda em todo push na `main`, com `expo prebuild` + Gradle, chave de debug e sem segredos (`android-nativo.yml:1-4`, `:12-16`). Cada execução gasta dois jobs de até 60 min (`:29-36`).
 - ADR-013: "Na `main`, o build Android nativo; o iOS é manual pelo EAS Build" (`docs/adr/0013-piramide-de-testes-e-ci.md:21`). ADR-001: correções por EAS Update, com assinatura, que exige plano pago (`0001-apps-react-native-com-expo.md:18-20`). O checklist exige a assinatura do EAS Update (S12) (`docs/operacao/checklist-deploy.md:136-142`).

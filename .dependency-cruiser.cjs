@@ -27,6 +27,10 @@ const ADAPTADORES_DO_NUCLEO = [
 // Client do Prisma gerado (gitignored): só os adaptadores de banco o importam.
 const CLIENT_GERADO = `${NUCLEO}/infra/gerado/`;
 
+// Base dos apps Expo, pelo caminho do fonte ou, se o pacote não estiver declarado em quem o importa
+// (e por isso não resolver), pelo nome do pacote.
+const MOBILE_BASE = '^(packages/mobile-base/|@bairrin/mobile-base($|/))';
+
 // Dependências npm resolvidas pelo pnpm vivem em `.../node_modules/<escopo>/<pacote>`.
 const NESTJS = '(^|/)node_modules/@nestjs/';
 const PRISMA = '(^|/)node_modules/@prisma/';
@@ -132,6 +136,24 @@ module.exports = {
       severity: 'error',
       from: { path: '^(apps/(?!api/)|packages/)' },
       to: { path: '^apps/api/' },
+    },
+    {
+      name: 'app-nao-importa-outro-app',
+      comment:
+        'Um app (consumidor, lojista, painel) nunca importa outro (ADR-002): o que é comum aos ' +
+        'dois apps Expo vai para packages/mobile-base; o que é comum a todos, para outro pacote.',
+      severity: 'error',
+      from: { path: '^apps/(?!api/)([^/]+)/' },
+      to: { path: '^apps/(?!api/)[^/]+/', pathNot: '^apps/$1/' },
+    },
+    {
+      name: 'base-mobile-so-nos-apps-expo',
+      comment:
+        'packages/mobile-base é a base dos apps Expo (React Native, SecureStore): o painel e ' +
+        'os pacotes que ele também usa (tokens, contratos, cliente-api) não a importam.',
+      severity: 'error',
+      from: { path: '^(apps/painel/|packages/(tokens|contratos|cliente-api)/)' },
+      to: { path: MOBILE_BASE },
     },
   ],
 

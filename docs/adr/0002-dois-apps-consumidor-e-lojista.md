@@ -18,4 +18,4 @@ O identificador `br.com.bairrin` segue o domínio invertido de um domínio nosso
 - Cada app pede só as suas permissões (câmera no lojista, localização no consumidor) e tem canal de push de alta prioridade só onde precisa (lojista).
 - Releases independentes e fichas separadas nas lojas, ao custo de dois builds e duas fichas para manter.
 - Código comum só entra em `packages/`. Um app nunca importa o outro, e nenhum app ou pacote importa `apps/api` (regra de `pnpm deps:verificar`).
-- Situação do código: os dois apps ainda não existem; só as pastas com `.env.example`.
+- Situação do código: os dois apps existem desde 2026-10-27 com a tela de estado da API e os identificadores definitivos (`br.com.bairrin.consumidor` e `br.com.bairrin.lojista`). Hoje cada um tem a sua cópia da tela `EstadoDaApi` e dos textos; o que for comum passa para `packages/mobile-base`: o pacote foi criado na etapa 1b do plano 01b, e a tela de estado e os textos dela mudam para lá na etapa 12a.

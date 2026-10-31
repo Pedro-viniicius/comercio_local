@@ -24,3 +24,4 @@
 - [Borda HTTP da Identidade](http-identidade-etapa16.md) — /v1/admin por metadados + rota casada, limites (IP primeiro na 16; a 19 passou a conta→IP→e-mail), ordem dos APP_GUARD, trust proxy nos testes, spawn da CLI, teste de tempo, scratchpad dividido
 - [Docs da Identidade (20a)](docs-identidade-20a.md) — fontes de verdade, Sentry não recebe warn do pino, ordem conta→IP→e-mail da 19, regex \1200 em tabela
 - [Testes transversais da Identidade (19)](http-identidade-etapa19.md) — cenario-http, roteador do Express 5, HEAD cai no GET, token sem mfa, contas iguais, JWT e relógio, foco
+- [Apps Expo SDK 58](expo-apps-sdk58.md) — versões, allowBuilds, audit (node-forge/zod do @expo/cli), jest-expo + RNTL 14, Router e prebuild

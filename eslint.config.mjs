@@ -153,4 +153,57 @@ export default defineConfig(
     extends: [reactHooks.configs.flat['recommended-latest'], reactRefresh.configs.vite],
     languageOptions: { globals: globals.browser },
   },
+
+  // Apps Expo e `@bairrin/mobile-base`: React Native, com as regras de hooks (sem o plugin do Vite).
+  {
+    files: [
+      'apps/consumidor/**/*.{ts,tsx}',
+      'apps/lojista/**/*.{ts,tsx}',
+      'packages/mobile-base/**/*.{ts,tsx}',
+    ],
+    extends: [reactHooks.configs.flat['recommended-latest']],
+  },
+
+  // Sessão do app (`@bairrin/mobile-base`): o token vive só no SecureStore (CA-03). AsyncStorage e
+  // FileSystem gravam em texto puro e ficam proibidos em `src/sessao`, por `import`, `import()` ou
+  // `require`. A cópia dos dados (`expo-file-system`) mora em outra pasta do pacote.
+  {
+    files: ['packages/mobile-base/src/sessao/**/*.{js,jsx,cjs,mjs,ts,tsx,mts,cts}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@react-native-async-storage/async-storage',
+              message: 'A sessão só usa o SecureStore (CA-03): AsyncStorage grava em texto puro.',
+            },
+            {
+              name: 'expo-file-system',
+              message: 'A sessão só usa o SecureStore (CA-03): FileSystem grava em texto puro.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['@react-native-async-storage/async-storage/*', 'expo-file-system/*'],
+              message: 'A sessão só usa o SecureStore (CA-03): sem AsyncStorage nem FileSystem.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        ...[
+          // Texto literal e template literal sem expressão: o Metro resolve os dois.
+          "CallExpression[callee.name='require'][arguments.0.value=",
+          'ImportExpression[source.value=',
+          "CallExpression[callee.name='require'][arguments.0.type='TemplateLiteral'][arguments.0.expressions.length=0][arguments.0.quasis.0.value.cooked=",
+          "ImportExpression[source.type='TemplateLiteral'][source.expressions.length=0][source.quasis.0.value.cooked=",
+        ].map((inicio) => ({
+          selector: `${inicio}/^(@react-native-async-storage\\/async-storage|expo-file-system)(\\/|$)/]`,
+          message: 'A sessão só usa o SecureStore (CA-03): sem AsyncStorage nem FileSystem.',
+        })),
+      ],
+    },
+  },
 );

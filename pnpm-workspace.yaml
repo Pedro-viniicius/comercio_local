@@ -17,6 +17,13 @@ allowBuilds:
   # esbuild: valida o binário nativo. Nenhum pacote o declara; entra como par opcional do
   # Vite (junto com o tsx), resolvido no lockfile.
   esbuild: true
+  # @parcel/watcher (vem do jest-haste-map e do Expo CLI): o script de instalação só compila do
+  # código-fonte se npm_config_build_from_source=true; o binário pré-compilado entra como par
+  # opcional por plataforma (@parcel/watcher-linux-x64-glibc etc.). Nada a rodar.
+  '@parcel/watcher': false
+  # unrs-resolver (vem do jest-resolve): o postinstall só confere se o binding nativo da
+  # plataforma, que também é par opcional (@unrs/resolver-binding-*), está presente. Nada a rodar.
+  unrs-resolver: false
 
 # Correções de segurança em dependências transitivas fixadas sem faixa pelo pacote que as
 # traz (ADR-013). O seletor `@<versão corrigida>` desliga o override sozinho quando o pacote
@@ -24,6 +31,17 @@ allowBuilds:
 overrides:
   # GHSA-q7qp-rjg7-q26m (alta, DoS): @nestjs/platform-express 12.1.3 (em uso) e 12.2.0 fixam multer 2.4.0.
   '@nestjs/platform-express>multer@<2.5.0': 2.5.0
+  # GHSA-mrhx-c7xc-m3w5 (alta, memória): @expo/cli declara zod `^3.25.76`; o npm audit marca a
+  # faixa como vulnerável (<4.6.6) e a correção está fora dela (salto de major, 3 para 4: caso
+  # diferente do multer, ADR-013). O override é seguro porque o CLI só usa o zod no
+  # `expo start` com plugin de devtools (`@expo/cli/build/src/start/server/DevToolsPlugin.schema.js`)
+  # e com o servidor MCP (`createMCPDevToolsExtensionSchema.js`), nunca em `expo export` nem em
+  # `expo prebuild`. Os dois arquivos usam object, string, enum, array, union, boolean, number,
+  # literal, readonly, optional, describe, `.strict()`, `.min()` e `.url()`; `DevToolsPlugin.js`
+  # chama `safeParse` e lê `error.message`. Todos existem no zod 4 (`.strict()` e `.url()`
+  # obsoletos, não removidos).
+  # Reconferir esses dois arquivos a cada subida do SDK. Sai quando o @expo/cli exigir zod >= 4.6.6.
+  '@expo/cli>zod@<4.6.6': 4.6.7
 
 # Versões compartilhadas por mais de um pacote, fixadas num lugar só.
 catalog:

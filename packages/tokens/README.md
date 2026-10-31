@@ -22,7 +22,7 @@ Valores em px, exceto onde o nome diz outra unidade.
 ## Como é consumido
 
 - Painel: `apps/painel/src/estilos/tokens.css.ts` gera as variáveis CSS a partir deste pacote.
-- Apps Expo: ainda não existem; vão importar o pacote pela condição `react-native`.
+- Apps Expo (`apps/consumidor` e `apps/lojista`): importam o pacote pela condição `react-native` (o Metro e o Jest leem o fonte em `src`) e montam o tema com `temaClaro`, `espaco`, `raio` e `fonte` em `StyleSheet`.
 
 O pacote exporta o fonte pela condição `@bairrin/fonte` e `react-native`, e o `dist` por `default`. O painel e os testes leem o fonte, então não é preciso compilar o pacote antes; o `dist` só é usado por quem importa pela condição `default`.
 

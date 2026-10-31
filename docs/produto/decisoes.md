@@ -2,6 +2,16 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-27 — Decisão do dono: nome e ícone do app do lojista
+- Contexto: revisão de UI do M1 (D4). "Bairrin Lojista" tem 15 caracteres, e o launcher do Android costuma cortar o nome sob o ícone perto de 12.
+- Decisão: o nome fica "Bairrin Lojista", aceitando o corte em alguns aparelhos (o nome completo aparece na loja). O ícone do lojista é uma variação do ícone do consumidor (mesmo símbolo com uma diferença, como cor de fundo ou selo), proposta pelo `designer` na spec de identidade antes dos arquivos de `assets/brand`.
+
+## 2026-10-27 — Decisão do dono: `node-forge` do CLI do Expo
+- Contexto: etapas 8 e 9 do 01a (apps Expo SDK 58). O `@expo/cli` traz `node-forge` 1.4.0 (GHSA-86w9-cpqp-85rv, alta), e o `pnpm audit --prod --audit-level=high` reprova. A correção (1.4.1) foi publicada em 2026-10-27 04:44 UTC e só passa no `minimumReleaseAge` (3 dias, S12) em 2026-10-30. O pacote só é usado pelo CLI (servidor de desenvolvimento, assinatura do EAS Update); não vai no bundle do app nem na imagem da API.
+- Decisão: esperar. A trilha mobile segue sem commit; em 2026-10-30, depois das 04:44 UTC, o `node-forge` sobe para 1.4.1 e só então sai o commit do M1, com o audit verde. Sem exceção no audit e sem furar a idade mínima.
+- Forma da correção (S123, revisão do M1): o `@expo/cli` e o `@expo/code-signing-certificates` declaram `^1.4.0`, que já aceita a 1.4.1; pela regra do ADR-013 basta atualizar o lockfile (`pnpm update node-forge --depth Infinity`), sem override.
+- Resolvido em 2026-10-31: `pnpm up -r node-forge` levou o lockfile ao `node-forge` 1.4.2 (dentro da faixa `^1.4.0`, publicado há mais de 3 dias), e o `pnpm audit --prod --audit-level=high` voltou a ficar limpo.
+
 ## 2026-10-23 — Decisão do dono: exclusão da conta do administrador (S113)
 - Contexto: revisão do grupo F do 01b (etapa 19). O `seguranca` mostrou que quem tem só a senha do admin, sem o segundo fator, entra pelo app (que não pede TOTP) e exclui a conta do admin; o painel ficaria sem administrador até um novo `seed:admin` pelo servidor.
 - Decisão: conta com perfil `admin` só pede a própria exclusão numa sessão do painel com `admin` e `mfa` (segundo fator concluído). De outra sessão, a API responde 403 com a orientação de usar o painel.

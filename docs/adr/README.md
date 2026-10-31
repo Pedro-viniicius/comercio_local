@@ -6,8 +6,8 @@ Cada ADR registra uma decisão que muda como o Bairrin é construído: o context
 
 | ADR                                                       | Decisão                                                              | Situação no código                                |
 | --------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------- |
-| [001](0001-apps-react-native-com-expo.md)                 | Apps em React Native com Expo e TypeScript                           | Apps ainda não criados                            |
-| [002](0002-dois-apps-consumidor-e-lojista.md)             | Dois apps (consumidor e lojista) com pacotes compartilhados          | Apps ainda não criados; pacotes prontos           |
+| [001](0001-apps-react-native-com-expo.md)                 | Apps em React Native com Expo e TypeScript                           | Apps mínimos prontos (SDK 58); sem EAS Update     |
+| [002](0002-dois-apps-consumidor-e-lojista.md)             | Dois apps (consumidor e lojista) com pacotes compartilhados          | Apps mínimos e pacotes prontos                    |
 | [003](0003-api-nestjs-monolito-modular.md)                | API NestJS como monólito modular, fronteiras checadas                | Núcleo e `pnpm deps:verificar` prontos            |
 | [004](0004-postgresql-e-prisma.md)                        | PostgreSQL com Prisma; migração destrutiva separada e barrada        | Pronto                                            |
 | [005](0005-hospedagem-fly-e-supabase.md)                  | Fly.io (gru) e Supabase (sa-east-1); Data API desligada; dois papéis | Nada publicado; painel e API prontos para deploy  |

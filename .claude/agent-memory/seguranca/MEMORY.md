@@ -1,3 +1,3 @@
 - [Áreas sensíveis](areas-sensiveis.md) — onde mora dado pessoal, entradas públicas, auth e invariantes do Bairrin
-- [Riscos aceitos](riscos-aceitos.md) — aceites explícitos do dono (P5, S100 e A-R12 do 01b; pendências de decisão: EAS Update, EXPO_TOKEN)
+- [Riscos aceitos](riscos-aceitos.md) — aceites do dono (P5, S100, A-R12, P3 EXPO_TOKEN, node-forge até 2026-10-30); P2 tirou o EAS Update
 - [Problemas recorrentes](problemas-recorrentes.md) — falhas a procurar sempre em planos e código

@@ -29,7 +29,9 @@ interface Dependencia {
 }
 interface Resultado {
   modules: { source: string; dependencies: Dependencia[] }[];
-  summary: { violations: { from: string; to: string; rule: { name: string } }[] };
+  summary: {
+    violations: { from: string; to: string; rule: { name: string; severity: string } }[];
+  };
 }
 
 /** Roda `depcruise apps packages` com a raiz dada e devolve o JSON (sai com 1 quando há violação). */
@@ -91,6 +93,16 @@ const esperadas: [regra: string, de: string][] = [
   // Apps e pacotes importando apps/api.
   ['fora-da-api-nao-importa-api', 'apps/consumidor/src/viola-api.ts'],
   ['fora-da-api-nao-importa-api', 'packages/comum/src/viola-api.ts'],
+  // Um app importando outro (ADR-002), em todas as direções com apps Expo e o painel.
+  ['app-nao-importa-outro-app', 'apps/consumidor/src/viola-outro-app.ts'],
+  ['app-nao-importa-outro-app', 'apps/lojista/src/viola-outro-app.ts'],
+  ['app-nao-importa-outro-app', 'apps/painel/src/viola-outro-app.ts'],
+  // Painel e pacotes base importando o mobile-base (pelo caminho e, no painel, pelo nome do pacote).
+  ['base-mobile-so-nos-apps-expo', 'apps/painel/src/viola-mobile-base.ts'],
+  ['base-mobile-so-nos-apps-expo', 'apps/painel/src/viola-mobile-base-pelo-nome.ts'],
+  ['base-mobile-so-nos-apps-expo', 'packages/tokens/src/viola-mobile-base.ts'],
+  ['base-mobile-so-nos-apps-expo', 'packages/contratos/src/viola-mobile-base.ts'],
+  ['base-mobile-so-nos-apps-expo', 'packages/cliente-api/src/viola-mobile-base.ts'],
   // Código de produção importando fake de teste (Q7).
   ['producao-nao-importa-test', `${M}/a/aplicacao/viola-fake-de-teste.ts`],
 ];
@@ -100,6 +112,11 @@ describe('fronteiras de camadas: fixtures', () => {
     const encontradas = fixtures.summary.violations.map((v) => `${v.rule.name} | ${v.from}`).sort();
     const previstas = esperadas.map(([regra, de]) => `${regra} | ${de}`).sort();
     expect(encontradas).toEqual(previstas);
+  });
+
+  it('toda violação das fixtures tem severidade error: só ela faz o `deps:verificar` sair com falha', () => {
+    const severidades = new Set(fixtures.summary.violations.map((v) => v.rule.severity));
+    expect([...severidades]).toEqual(['error']);
   });
 
   it('toda regra da configuração tem ao menos uma fixture que a reprova', () => {
@@ -121,6 +138,10 @@ describe('fronteiras de camadas: fixtures', () => {
       `${M}/a/http/controlador.ts`,
       `${M}/b/aplicacao/usa-index-de-a.ts`,
       'apps/consumidor/src/usa-pacote.ts',
+      // Um app importa os próprios arquivos; os apps Expo importam o mobile-base.
+      'apps/lojista/src/usa-proprio.ts',
+      'apps/consumidor/src/usa-mobile-base.ts',
+      'apps/lojista/src/usa-mobile-base.ts',
     ];
     const origens = new Set(fixtures.modules.map((m) => m.source));
     const reprovados = new Set(fixtures.summary.violations.map((v) => v.from));
@@ -130,7 +151,7 @@ describe('fronteiras de camadas: fixtures', () => {
     }
   });
 
-  it('a resolução enxerga os imports: só o subcaminho inexistente fica sem resolver', () => {
+  it('a resolução enxerga os imports: só o subcaminho inexistente e o pacote não declarado ficam sem resolver', () => {
     const naoResolvidas = fixtures.modules
       .flatMap((m) =>
         m.dependencies.filter((d) => d.couldNotResolve).map((d) => `${m.source} -> ${d.module}`),
@@ -138,6 +159,7 @@ describe('fronteiras de camadas: fixtures', () => {
       .sort();
     expect(naoResolvidas).toEqual([
       `${M}/a/dominio/viola-contratos-outro-subcaminho.ts -> @bairrin/contratos/outro`,
+      'apps/painel/src/viola-mobile-base-pelo-nome.ts -> @bairrin/mobile-base',
     ]);
   });
 
