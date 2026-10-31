@@ -1,6 +1,6 @@
 # ADR-012: Sessão com JWT curto e renovação opaca rotativa
 
-- Situação: aceita (decisão do dono, 2026-10-16). Implementada na API (`apps/api/src/modulos/identidade`) e no painel (`apps/painel`) pelo plano 01b. Os apps Expo usam a mesma API, mas a parte deles (SecureStore, fila offline, limpeza no logout) vem na trilha mobile e ainda não existe.
+- Situação: aceita (decisão do dono, 2026-10-16). Implementada na API (`apps/api/src/modulos/identidade`) e no painel (`apps/painel`) pelo plano 01b. Nos apps Expo, a sessão (SecureStore, limpeza no logout, na expiração e na troca de conta) está em `packages/mobile-base/src/sessao` (plano 01b, etapa 12); as telas de conta vêm nas etapas 14, 17 e 18, e a fila offline no plano 02.
 - Origem: `docs/produto/planos/00-arquitetura.md` (ADR-012) e `docs/produto/planos/01b-identidade.md`. Este texto traz os detalhes finais; o passo a passo de cada fluxo, os eventos e os limites estão em `apps/api/src/modulos/identidade/README.md`.
 
 ## Contexto

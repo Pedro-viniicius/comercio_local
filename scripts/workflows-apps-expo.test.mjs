@@ -102,6 +102,24 @@ describe('workflows dos apps Expo, sem atalho', () => {
       assert.doesNotMatch(codigo, /\bif:/);
     });
 
+    it('o setup-java não usa `cache:` antes do prebuild (a pasta android/ não está no git)', () => {
+      // `cache: gradle` monta a chave com os arquivos do Gradle, que só existem depois do
+      // `expo prebuild`; antes dele o passo falha (visto no CI do bfd7cee).
+      const passos = codigo.split(/^\s+- name:/m).slice(1);
+      const java = passos.filter((passo) => /actions\/setup-java@/.test(passo));
+      const indicePrebuild = passos.findIndex((passo) => /expo prebuild/.test(passo));
+      assert.ok(java.length > 0, 'passo setup-java não encontrado');
+      assert.ok(indicePrebuild >= 0, 'passo expo prebuild não encontrado');
+      for (const passo of java) {
+        if (/^\s+cache:/m.test(passo)) {
+          assert.ok(
+            passos.indexOf(passo) > indicePrebuild,
+            'setup-java com cache antes do prebuild',
+          );
+        }
+      }
+    });
+
     it('a matriz não interrompe os outros apps, mas cada app falha por si', () => {
       assert.match(codigo, /fail-fast: false/);
     });

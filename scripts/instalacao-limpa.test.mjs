@@ -49,6 +49,9 @@ before(() => {
   for (const arquivo of ['package.json', 'pnpm-workspace.yaml', 'tsconfig.base.json']) {
     copyFileSync(join(RAIZ, arquivo), join(copia, arquivo));
   }
+  // A identidade visual faz parte do código-fonte: o logo do mobile-base é conferido contra
+  // `assets/brand` e os ícones dos apps apontam para lá.
+  cpSync(join(RAIZ, 'assets'), join(copia, 'assets'), { recursive: true });
   symlinkSync(join(RAIZ, 'node_modules'), join(copia, 'node_modules'));
 });
 

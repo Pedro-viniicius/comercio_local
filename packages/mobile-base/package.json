@@ -8,7 +8,8 @@
       "react-native": "./src/index.ts",
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    }
+    },
+    "./app.plugin.js": "./app.plugin.js"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

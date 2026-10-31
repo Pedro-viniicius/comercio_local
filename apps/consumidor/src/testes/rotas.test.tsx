@@ -2,6 +2,7 @@
 // fala com a API pelo cliente real (@bairrin/cliente-api), com o `fetch` trocado por um falso.
 // Fica fora de `src/app`: o Expo Router trataria um `*.test.tsx` ali dentro como rota.
 import { renderRouter, screen } from 'expo-router/testing-library';
+import { textos as textosComuns } from '@bairrin/mobile-base';
 import { textos } from '../textos/pt-BR.ts';
 
 const ENDERECO = 'EXPO_PUBLIC_API_URL';
@@ -35,7 +36,7 @@ describe('rota inicial', () => {
 
     await abrir('https://api.exemplo.test/');
 
-    expect(await screen.findByText(textos.estadoDaApi.disponivel)).toBeOnTheScreen();
+    expect(await screen.findByText(textosComuns.estadoDaApi.disponivel)).toBeOnTheScreen();
     expect(buscar).toHaveBeenCalledTimes(1);
     expect(buscar).toHaveBeenCalledWith('https://api.exemplo.test/v1/saude', expect.anything());
   });
@@ -54,13 +55,13 @@ describe('rota inicial', () => {
 
     await abrir(undefined);
 
-    expect(await screen.findByText(textos.estadoDaApi.semConfiguracao)).toBeOnTheScreen();
+    expect(await screen.findByText(textosComuns.estadoDaApi.semConfiguracao)).toBeOnTheScreen();
     expect(buscar).not.toHaveBeenCalled();
   });
 
   it('o cabeçalho nativo leva o nome do app', async () => {
     await abrir(undefined);
-    await screen.findByText(textos.estadoDaApi.semConfiguracao);
+    await screen.findByText(textosComuns.estadoDaApi.semConfiguracao);
 
     // O título do cabeçalho é desenhado pelo sistema: só aparece como propriedade da árvore.
     expect(JSON.stringify(screen.toJSON())).toContain(`"title":"${textos.titulo}"`);

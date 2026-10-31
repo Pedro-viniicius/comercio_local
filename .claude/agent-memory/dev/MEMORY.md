@@ -25,3 +25,5 @@
 - [Docs da Identidade (20a)](docs-identidade-20a.md) — fontes de verdade, Sentry não recebe warn do pino, ordem conta→IP→e-mail da 19, regex \1200 em tabela
 - [Testes transversais da Identidade (19)](http-identidade-etapa19.md) — cenario-http, roteador do Express 5, HEAD cai no GET, token sem mfa, contas iguais, JWT e relógio, foco
 - [Apps Expo SDK 58](expo-apps-sdk58.md) — versões, allowBuilds, audit (node-forge/zod do @expo/cli), jest-expo + RNTL 14, Router e prebuild
+- [Componentes base do mobile-base](mobile-base-componentes.md) — RN 0.88/RNTL 14/Jest 30: tipos de ref, foco, anúncio só no iOS, testes de plataforma, prettier em pasta alheia
+- [Sessão mobile (etapa 12)](sessao-mobile-etapa12.md) — lint por regex de permissão, noInlineConfig, espião Proxy no Jest, gcTime trava o Jest, introspect x prebuild, app.plugin.js

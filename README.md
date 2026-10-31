@@ -103,7 +103,7 @@ Conta única por e-mail, com os perfis `consumidor`, `lojista` e `admin`. O mesm
 - **Renovação:** token opaco rotativo, guardado no servidor só como HMAC. Nos apps dura 30 dias deslizantes e vai no corpo; no painel vai em cookie `HttpOnly; Secure; SameSite=Strict` (`bairrin_renovacao`), com 30 minutos de inatividade e 12 horas no máximo, conferidos no servidor. Logout e troca de senha revogam a sessão no servidor na hora: a renovação deixa de valer, e o token de acesso já emitido cai na hora em `/v1/admin` e nas rotas com `@ConfereSessao()` (dados da conta e cópia dos dados); nas demais, ele vale até completar os 15 minutos. A exclusão da conta também revoga as sessões e desativa a conta, e o token de acesso cai na hora em qualquer rota.
 - **Admin:** senha e depois código do app autenticador (TOTP). A conta admin só pede a própria exclusão pelo painel, com o segundo fator (S113). Quem ainda não tem 2FA o configura antes de qualquer outra coisa, no próprio painel. Quem perde o celular e os códigos de recuperação usa a CLI de reconfiguração (`pnpm --filter api reconfigurar-segundo-fator`).
 - **API e painel:** `packages/cliente-api/README.md` (renovação em 401, fila única, revogação pendente) e `apps/painel/README.md` (telas de entrada, inatividade e várias abas).
-- **Apps Expo:** guardam a sessão no SecureStore e limpam tudo no logout; essa parte ficará em `packages/mobile-base/README.md`, hoje um esqueleto; o texto completo vem na trilha mobile (plano 01b, etapa 20b).
+- **Apps Expo:** guardam a sessão no SecureStore e limpam tudo no logout; o resumo está em `packages/mobile-base/README.md` (sessão em `src/sessao`, plano 01b, etapa 12); o texto completo vem na etapa 20b.
 
 Para ter um admin em desenvolvimento, com o banco migrado, o `seed` rodado (grava os termos e a política que o cadastro exige) e a API e o worker no ar:
 
@@ -136,7 +136,7 @@ pnpm --filter api test:integracao -- outbox        # só os arquivos *outbox*.in
 pnpm --filter painel exec vitest run src/App.test.tsx
 ```
 
-Os apps Expo usam o Jest (`jest-expo`): `pnpm --filter consumidor exec jest src/telas/EstadoDaApi.test.tsx` (o mesmo vale para `lojista` e `@bairrin/mobile-base`).
+Os apps Expo usam o Jest (`jest-expo`): `pnpm --filter @bairrin/mobile-base exec jest src/telas/EstadoDaApi.test.tsx` (o mesmo vale para `consumidor` e `lojista`, com os testes de rota em `src/testes`).
 
 Os testes de integração apagam e recriam os schemas do Postgres de teste (porta 5433) a cada execução; nunca apontam para o banco de desenvolvimento.
 

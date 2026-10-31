@@ -3,8 +3,9 @@
 // acessibilidade (região de status anunciada, símbolo escondido do leitor de tela).
 import { ErroCancelado, ErroDeApi, ErroSemConexao, type ClienteApi } from '@bairrin/cliente-api';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, Platform } from 'react-native';
 import { temaClaro } from '@bairrin/tokens';
+import { anelDeFoco } from '../componentes/estilos.ts';
 import { textos } from '../textos/pt-BR.ts';
 import { EstadoDaApi } from './EstadoDaApi.tsx';
 
@@ -278,6 +279,85 @@ describe('EstadoDaApi, bordas', () => {
       expect(screen.getByRole('button', { name: t.verificandoBotao })).toHaveStyle({
         backgroundColor: temaClaro.bg.subtle,
       });
+    });
+  });
+  describe('anúncio manual só no iOS (D9)', () => {
+    let anunciar: jest.SpyInstance;
+    beforeEach(() => {
+      anunciar = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation();
+      anunciar.mockClear();
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    it('no iOS anuncia o resultado à mão', async () => {
+      jest.replaceProperty(Platform, 'OS', 'ios');
+      const cliente: ClienteFalso = { consultarSaude: () => Promise.resolve({ status: 'ok' }) };
+      await render(<EstadoDaApi cliente={cliente} />);
+      await screen.findByText(t.disponivel);
+
+      expect(anunciar).toHaveBeenCalledWith(t.disponivel);
+    });
+
+    it('no Android a região viva anuncia: nenhuma chamada manual, em nenhum estado', async () => {
+      jest.replaceProperty(Platform, 'OS', 'android');
+      const consultarSaude = jest
+        .fn<ReturnType<ClienteFalso['consultarSaude']>, []>()
+        .mockRejectedValueOnce(new ErroSemConexao('rede'))
+        .mockResolvedValueOnce({ status: 'ok' });
+      await render(<EstadoDaApi cliente={{ consultarSaude }} />);
+      await screen.findByText(t.semConexao);
+      await fireEvent.press(screen.getByRole('button', { name: t.tentarDeNovo }));
+      await screen.findByText(t.disponivel);
+      await render(<EstadoDaApi cliente={null} />);
+
+      expect(anunciar).not.toHaveBeenCalled();
+      // O que anuncia no Android é a região de status, que existe desde o início e é educada.
+      expect(screen.getByRole('status').props.accessibilityLiveRegion).toBe('polite');
+      expect(screen.getByRole('status')).toHaveTextContent(new RegExp(t.semConfiguracao));
+    });
+  });
+
+  describe('botão: foco visível (D8) e estado ocupado (D2)', () => {
+    it('em foco, o botão "Tentar de novo" mostra o anel de 2 px `focus.ring`', async () => {
+      const cliente: ClienteFalso = {
+        consultarSaude: () => Promise.reject(new ErroSemConexao('rede')),
+      };
+      await render(<EstadoDaApi cliente={cliente} />);
+      const botao = () => screen.getByRole('button', { name: t.tentarDeNovo });
+      expect(await screen.findByRole('button', { name: t.tentarDeNovo })).not.toHaveStyle({
+        outlineWidth: 2,
+      });
+
+      await fireEvent(botao(), 'focus');
+      expect(botao()).toHaveStyle(anelDeFoco);
+      await fireEvent(botao(), 'blur');
+      expect(botao()).not.toHaveStyle({ outlineWidth: 2 });
+    });
+
+    it('ocupado, o botão mantém o foco e o anel, mostra o indicador e continua na árvore', async () => {
+      const consultarSaude = jest
+        .fn<ReturnType<ClienteFalso['consultarSaude']>, []>()
+        .mockRejectedValueOnce(new ErroSemConexao('rede'))
+        .mockImplementation(() => new Promise(() => undefined));
+      await render(<EstadoDaApi cliente={{ consultarSaude }} />);
+      await fireEvent(await screen.findByRole('button', { name: t.tentarDeNovo }), 'focus');
+      await fireEvent.press(screen.getByRole('button', { name: t.tentarDeNovo }));
+
+      const ocupado = screen.getByRole('button', { name: t.verificandoBotao });
+      expect(ocupado).toBeBusy();
+      expect(ocupado).toBeDisabled();
+      expect(ocupado).toHaveStyle(anelDeFoco);
+      expect(
+        screen.getByTestId('botao-indicador', { includeHiddenElements: true }),
+      ).toBeOnTheScreen();
+    });
+
+    it('a primeira verificação não mostra botão nem indicador', async () => {
+      const consultarSaude = jest.fn(() => new Promise<never>(() => undefined));
+      await render(<EstadoDaApi cliente={{ consultarSaude }} />);
+
+      expect(screen.queryByRole('button')).toBeNull();
+      expect(screen.queryByTestId('botao-indicador', { includeHiddenElements: true })).toBeNull();
     });
   });
 });

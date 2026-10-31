@@ -2,6 +2,10 @@
 
 Uma entrada por decisão, a mais nova primeiro. "Decisão do dono" é o que ele pediu explicitamente em 2026-10-16. "Premissa adotada" é o que o time assumiu por falta de resposta e precisa de confirmação; premissa não é decisão e pode ser revista sem fato novo.
 
+## 2026-10-31 — Decisão do dono: `src/instalacao` como regra de negócio
+- Contexto: revisão do M2 (R10). A etapa 12 criou `packages/mobile-base/src/instalacao` com a marca de instalação, a única saída da lista de permissão de `src/sessao`.
+- Decisão: a pasta entra na lista de regra de negócio do `CLAUDE.md` (o `designer` não toca) e ganha regra de lint própria.
+
 ## 2026-10-27 — Decisão do dono: nome e ícone do app do lojista
 - Contexto: revisão de UI do M1 (D4). "Bairrin Lojista" tem 15 caracteres, e o launcher do Android costuma cortar o nome sob o ícone perto de 12.
 - Decisão: o nome fica "Bairrin Lojista", aceitando o corte em alguns aparelhos (o nome completo aparece na loja). O ícone do lojista é uma variação do ícone do consumidor (mesmo símbolo com uma diferença, como cor de fundo ou selo), proposta pelo `designer` na spec de identidade antes dos arquivos de `assets/brand`.

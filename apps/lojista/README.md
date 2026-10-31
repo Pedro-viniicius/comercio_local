@@ -8,17 +8,17 @@ Mínimo pronto (plano 01a, etapa 9): Expo SDK 58 (`expo` 58.0.17, React Native 0
 
 ## O que o app tem
 
-| Item                           | Valor                                                                   |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| Nome                           | "Bairrin Lojista"                                                       |
-| `bundleIdentifier` e `package` | `br.com.bairrin.lojista`                                                |
-| `scheme`                       | `bairrin-lojista`                                                       |
-| Navegação                      | Expo Router, em `src/app`                                               |
-| Configuração                   | `app.config.ts` e `eas.json` (perfis development, preview e production) |
-| Tela inicial                   | `src/app/index.tsx` (rota) e `src/telas/EstadoDaApi.tsx` (a tela)       |
-| Tema                           | `@bairrin/tokens` (só o tema claro, o único do MVP)                     |
-| Textos                         | `src/textos/pt-BR.ts`                                                   |
-| Testes                         | `jest-expo` e Testing Library (`@testing-library/react-native`)         |
+| Item                           | Valor                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| Nome                           | "Bairrin Lojista"                                                              |
+| `bundleIdentifier` e `package` | `br.com.bairrin.lojista`                                                       |
+| `scheme`                       | `bairrin-lojista`                                                              |
+| Navegação                      | Expo Router, em `src/app`                                                      |
+| Configuração                   | `app.config.ts` e `eas.json` (perfis development, preview e production)        |
+| Tela inicial                   | `src/app/index.tsx` (rota); a tela `EstadoDaApi` vem de `@bairrin/mobile-base` |
+| Tema                           | `@bairrin/tokens` (só o tema claro, o único do MVP)                            |
+| Textos                         | `src/textos/pt-BR.ts`                                                          |
+| Testes                         | `jest-expo` e Testing Library (`@testing-library/react-native`)                |
 
 O identificador é permanente nas lojas. O prefixo `br.com.bairrin` segue o domínio `bairrin.com.br` (a registrar). Decisões: ADR-001 e ADR-002.
 
@@ -27,7 +27,7 @@ O identificador é permanente nas lojas. O prefixo `br.com.bairrin` segue o dom�
 ```
 src/app/       só rotas do Expo Router (_layout.tsx e index.tsx). Nada de teste aqui:
                todo arquivo desta pasta vira rota
-src/telas/     telas e seus testes (EstadoDaApi.tsx e EstadoDaApi.test.tsx)
+src/telas/     telas próprias do app (hoje nenhuma; EstadoDaApi está no @bairrin/mobile-base)
 src/textos/    texto de interface
 src/testes/    testes que montam o Expo Router inteiro (rotas.test.tsx)
 ```
@@ -47,7 +47,7 @@ Copie `.env.example` para `.env` (fora do git).
 | --------------------- | ---------------------------------------------------------------- |
 | `EXPO_PUBLIC_API_URL` | Endereço da API. Vai embutida no app: **nunca coloque segredo.** |
 
-No emulador Android use `http://10.0.2.2:3000`; no celular físico, o IP da sua máquina na rede local; `127.0.0.1` serve ao simulador iOS e à web.
+No emulador Android use `http://10.0.2.2:3000`; no celular físico, o IP da sua máquina na rede local; `127.0.0.1` serve ao simulador iOS e à web. Endereço `http://` só vale em desenvolvimento (`__DEV__`): num build `preview` ou `production` o app exige `https://` e, sem ele, mostra o aviso de configuração (S125).
 
 ## Comandos
 
@@ -65,7 +65,7 @@ pnpm --filter lojista exec expo export --platform ios
 ## Regras que valem desde já
 
 - Texto de interface em `src/textos/pt-BR.ts`, nunca solto no componente.
-- Regra de negócio fora do componente. Tokens vêm de `@bairrin/tokens`; sessão e fila offline virão de `@bairrin/mobile-base` (já nas dependências; hoje um esqueleto, plano 01b, etapas 12 em diante). Até a etapa 12a, que leva a tela para o pacote, `EstadoDaApi` e os textos existem em cópia nos dois apps.
+- Regra de negócio fora do componente. Tokens vêm de `@bairrin/tokens`; componentes, a tela `EstadoDaApi` e os textos comuns vêm de `@bairrin/mobile-base` (etapa 12a do plano 01b); sessão e fila offline também virão de lá (etapa 12 em diante). O app guarda em `src/textos/pt-BR.ts` só o que é dele.
 - Cache de leitura só com consultas públicas; fila offline cifrada (ADR-009).
 - Antes de publicar atualizações, ligar a assinatura de código do EAS Update (`docs/operacao/checklist-deploy.md`).
 - Permissão sensível deste app: câmera (fotos de produto). Peça só o que o app usa.

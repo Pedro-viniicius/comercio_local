@@ -1,9 +1,13 @@
-// Estado da API (CA-F6 do plano 01a): mostra se a API responde. O cliente chega por propriedade
-// para o teste trocar por um falso; `null` = sem endereço (EXPO_PUBLIC_API_URL).
+// Estado da API (CA-F6 do plano 01a): mostra se a API responde. Compartilhado pelos dois apps. O
+// cliente chega por propriedade para o teste trocar por um falso; `null` = sem endereço
+// (EXPO_PUBLIC_API_URL).
 import { ehErroSemConexao, type ClienteApi } from '@bairrin/cliente-api';
-import { espaco, fonte, pesoDaFonte, raio, tamanho, temaClaro } from '@bairrin/tokens';
+import { espaco, raio, temaClaro } from '@bairrin/tokens';
 import { useEffect, useState } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { anunciar } from '../componentes/acessibilidade.ts';
+import { Botao } from '../componentes/Botao.tsx';
+import { estiloDeTexto } from '../componentes/estilos.ts';
 import { textos } from '../textos/pt-BR.ts';
 
 type Estado = 'verificando' | 'disponivel' | 'semConexao' | 'erroDaApi';
@@ -72,14 +76,15 @@ export function EstadoDaApi({ cliente }: EstadoDaApiProps) {
   const apresentacao = apresentacoes[chave];
   const cores = temaClaro.status[apresentacao.tom];
 
-  // O Android anuncia pela região viva; o iOS não, então o resultado é anunciado à mão (nunca o
-  // "Verificando…" inicial ou das novas tentativas, que o botão já sinaliza como ocupado).
+  // O Android anuncia pela região viva; o iOS não, então o resultado é anunciado à mão, só no iOS
+  // (D9). Nunca o "Verificando…" inicial ou das novas tentativas, que o botão já sinaliza como
+  // ocupado.
   const textoAnunciado =
     chave === 'verificando'
       ? null
       : [apresentacao.texto, apresentacao.dica].filter(Boolean).join('. ');
   useEffect(() => {
-    if (textoAnunciado) AccessibilityInfo.announceForAccessibility(textoAnunciado);
+    if (textoAnunciado) anunciar(textoAnunciado);
   }, [textoAnunciado]);
 
   // O botão fica na tela (com o foco) enquanto verifica de novo; o resultado é anunciado pela
@@ -115,20 +120,12 @@ export function EstadoDaApi({ cliente }: EstadoDaApiProps) {
         </View>
       </View>
       {mostrarBotao ? (
-        <Pressable
-          role="button"
-          aria-disabled={verificandoDeNovo}
-          accessibilityState={{ disabled: verificandoDeNovo, busy: verificandoDeNovo }}
-          onPress={tentarDeNovo}
-          style={({ pressed }) => [
-            estilos.botao,
-            verificandoDeNovo ? estilos.botaoOcupado : pressed && estilos.botaoPressionado,
-          ]}
-        >
-          <Text style={[estilos.botaoTexto, verificandoDeNovo && estilos.botaoTextoOcupado]}>
-            {verificandoDeNovo ? t.verificandoBotao : t.tentarDeNovo}
-          </Text>
-        </Pressable>
+        <Botao
+          rotulo={t.tentarDeNovo}
+          aoPressionar={tentarDeNovo}
+          carregando={verificandoDeNovo}
+          rotuloCarregando={t.verificandoBotao}
+        />
       ) : null}
     </View>
   );
@@ -143,48 +140,15 @@ const estilos = StyleSheet.create({
     borderColor: temaClaro.border.subtle,
     backgroundColor: temaClaro.bg.surface,
   },
-  secao: {
-    fontSize: fonte.titleSm.tamanho,
-    lineHeight: fonte.titleSm.alturaLinha,
-    fontWeight: `${pesoDaFonte.semibold}`,
-    color: temaClaro.text.primary,
-  },
+  secao: { ...estiloDeTexto('titleSm', 'semibold'), color: temaClaro.text.primary },
   estado: {
     flexDirection: 'row',
     gap: espaco[3],
     padding: espaco[3],
     borderRadius: raio.md,
   },
-  simbolo: {
-    fontSize: fonte.body.tamanho,
-    lineHeight: fonte.body.alturaLinha,
-    fontWeight: `${pesoDaFonte.semibold}`,
-  },
+  simbolo: estiloDeTexto('body', 'semibold'),
   textos: { flex: 1 },
-  texto: {
-    fontSize: fonte.body.tamanho,
-    lineHeight: fonte.body.alturaLinha,
-    fontWeight: `${pesoDaFonte.semibold}`,
-  },
-  dica: {
-    fontSize: fonte.bodySm.tamanho,
-    lineHeight: fonte.bodySm.alturaLinha,
-  },
-  botao: {
-    minHeight: tamanho.touch.min,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: espaco[4],
-    borderRadius: raio.md,
-    backgroundColor: temaClaro.action.primary,
-  },
-  botaoPressionado: { backgroundColor: temaClaro.action.primaryPressed },
-  botaoOcupado: { backgroundColor: temaClaro.bg.subtle },
-  botaoTextoOcupado: { color: temaClaro.text.secondary },
-  botaoTexto: {
-    fontSize: fonte.body.tamanho,
-    lineHeight: fonte.body.alturaLinha,
-    fontWeight: `${pesoDaFonte.semibold}`,
-    color: temaClaro.text.onAction,
-  },
+  texto: estiloDeTexto('body', 'semibold'),
+  dica: estiloDeTexto('bodySm'),
 });

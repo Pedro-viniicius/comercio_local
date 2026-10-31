@@ -82,12 +82,17 @@ for (const [app, esperado] of Object.entries(APPS)) {
         'android.permission.WRITE_EXTERNAL_STORAGE',
       ]);
       assert.deepEqual(plugin('expo-router'), ['expo-router', { sitemap: false }]);
+      // As regras de backup são as do plugin do Bairrin (etapa 12 do 01b), que também excluem o
+      // SecureStore; sem biometria, sem `NSFaceIDUsageDescription` (o manifesto gerado é conferido
+      // em `scripts/backup-android.test.mjs`).
       assert.deepEqual(plugin('expo-secure-store'), [
         'expo-secure-store',
-        { configureAndroidBackup: true },
+        { configureAndroidBackup: false, faceIDPermission: false },
       ]);
-      // O plugin é resolvido a partir da pasta do app: o pacote tem de estar nas dependências dele.
+      assert.ok(config.plugins.includes('@bairrin/mobile-base'));
+      // Os plugins são resolvidos a partir da pasta do app: os pacotes têm de estar nas dependências dele.
       assert.ok(lerJson(`apps/${app}/package.json`).dependencies['expo-secure-store']);
+      assert.ok(lerJson(`apps/${app}/package.json`).dependencies['@bairrin/mobile-base']);
     });
 
     it('tem os três perfis do EAS e só EXPO_PUBLIC_API_URL como variável, apontando para HTTPS', () => {

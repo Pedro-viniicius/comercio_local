@@ -164,46 +164,87 @@ export default defineConfig(
     extends: [reactHooks.configs.flat['recommended-latest']],
   },
 
-  // Sessão do app (`@bairrin/mobile-base`): o token vive só no SecureStore (CA-03). AsyncStorage e
-  // FileSystem gravam em texto puro e ficam proibidos em `src/sessao`, por `import`, `import()` ou
-  // `require`. A cópia dos dados (`expo-file-system`) mora em outra pasta do pacote.
+  // Config plugin do Expo (`@bairrin/mobile-base/app.plugin.js`): CommonJS, carregado pelo `require`
+  // do Expo CLI no Node, na configuração dos apps (não entra no bundle).
   {
-    files: ['packages/mobile-base/src/sessao/**/*.{js,jsx,cjs,mjs,ts,tsx,mts,cts}'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: [
+    files: ['packages/mobile-base/app.plugin.js'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+
+  // Sessão do app (`@bairrin/mobile-base`): o token vive só no SecureStore (CA-03). Em `src/sessao`,
+  // os imports seguem uma lista de permissão (S121): qualquer módulo fora dela (AsyncStorage,
+  // FileSystem, SQLite, o `Settings` do `react-native`, que gravam em texto puro, ou um pacote novo)
+  // reprova. `import()` e `require` não entram, nem com caminho literal. Nenhum comentário desliga
+  // regra nesses arquivos (`noInlineConfig`). A marca de instalação (`src/instalacao`, que usa o
+  // FileSystem sem receber dado) é a única importação de fora da pasta.
+  ...(() => {
+    const ARQUIVOS = '{js,jsx,cjs,mjs,ts,tsx,mts,cts}';
+    const PERMITIDOS = [
+      'expo-secure-store',
+      'react',
+      '@bairrin/cliente-api',
+      '@bairrin/contratos',
+      '@tanstack/react-query',
+      // Relativo dentro da pasta, sem `..` no meio.
+      String.raw`\./[\w-]+(?:\.[\w-]+)*(?:/[\w-]+(?:\.[\w-]+)*)*`,
+      String.raw`\.\./instalacao/marca-de-instalacao\.ts`,
+    ];
+    const NOS_TESTES = ['@testing-library/react-native'];
+    // Os auxiliares de `src/sessao/teste` importam da pasta de cima (`../x.ts`), e só dela.
+    const NOS_AUXILIARES = [String.raw`\.\./[\w-]+(?:\.[\w-]+)*`];
+    const mensagem =
+      'A sessão só importa da lista permitida (CA-03, S121): expo-secure-store, react, ' +
+      '@bairrin/cliente-api, @bairrin/contratos, @tanstack/react-query e arquivos da pasta. ' +
+      'AsyncStorage, FileSystem e SQLite gravam em texto puro.';
+    const listaDePermissao = (lista) => [
+      'error',
+      {
+        patterns: [
+          {
+            regex: `^(?!(?:${lista.join('|')})$)`,
+            caseSensitive: true,
+            message: mensagem,
+          },
+        ],
+      },
+    ];
+    return [
+      {
+        files: [`packages/mobile-base/src/sessao/**/*.${ARQUIVOS}`],
+        linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'error' },
+        rules: {
+          'no-restricted-imports': listaDePermissao(PERMITIDOS),
+          'no-restricted-syntax': [
+            'error',
             {
-              name: '@react-native-async-storage/async-storage',
-              message: 'A sessão só usa o SecureStore (CA-03): AsyncStorage grava em texto puro.',
+              selector: 'ImportExpression',
+              message: 'Sem `import()` na sessão (S121): só `import` estático da lista permitida.',
             },
             {
-              name: 'expo-file-system',
-              message: 'A sessão só usa o SecureStore (CA-03): FileSystem grava em texto puro.',
-            },
-          ],
-          patterns: [
-            {
-              group: ['@react-native-async-storage/async-storage/*', 'expo-file-system/*'],
-              message: 'A sessão só usa o SecureStore (CA-03): sem AsyncStorage nem FileSystem.',
+              selector: "Identifier[name='require']",
+              message: 'Sem `require` na sessão (S121): só `import` estático da lista permitida.',
             },
           ],
         },
-      ],
-      'no-restricted-syntax': [
-        'error',
-        ...[
-          // Texto literal e template literal sem expressão: o Metro resolve os dois.
-          "CallExpression[callee.name='require'][arguments.0.value=",
-          'ImportExpression[source.value=',
-          "CallExpression[callee.name='require'][arguments.0.type='TemplateLiteral'][arguments.0.expressions.length=0][arguments.0.quasis.0.value.cooked=",
-          "ImportExpression[source.type='TemplateLiteral'][source.expressions.length=0][source.quasis.0.value.cooked=",
-        ].map((inicio) => ({
-          selector: `${inicio}/^(@react-native-async-storage\\/async-storage|expo-file-system)(\\/|$)/]`,
-          message: 'A sessão só usa o SecureStore (CA-03): sem AsyncStorage nem FileSystem.',
-        })),
-      ],
-    },
-  },
+      },
+      {
+        files: [
+          `packages/mobile-base/src/sessao/**/*.test.${ARQUIVOS}`,
+          `packages/mobile-base/src/sessao/teste/**/*.${ARQUIVOS}`,
+        ],
+        rules: { 'no-restricted-imports': listaDePermissao([...PERMITIDOS, ...NOS_TESTES]) },
+      },
+      {
+        files: [`packages/mobile-base/src/sessao/teste/*.${ARQUIVOS}`],
+        rules: {
+          'no-restricted-imports': listaDePermissao([
+            ...PERMITIDOS,
+            ...NOS_TESTES,
+            ...NOS_AUXILIARES,
+          ]),
+        },
+      },
+    ];
+  })(),
 );

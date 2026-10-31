@@ -1,0 +1,22 @@
+---
+name: grupo-m2-sessao-componentes
+description: M2 (etapas 12 e 12a do 01b, sessão dos apps e componentes) - R1 2026-10-31, Q36-Q38 baixos, testes novos, mutação, Q35 provado, armadilhas
+metadata:
+  type: project
+---
+
+R1 (2026-10-31): APROVADO COM RESSALVAS (3 bugs baixos). Q36 (troca de conta com a fila da conta A falhando deixa o estado `com_sessao` sem sessão guardada e a sessão B sem revogação), Q37 (máscara de telefone transforma `+54 9 11 1234 5678` em celular BR válido), Q38 (`formatarDataLegal('2026-02-31')` devolve `31/02/2026`). Os 3 testes que reproduzem ficam VERMELHOS de propósito: `sessao-do-app.corridas.test.ts` ("a interface não fica com sessão"), `mascara-de-telefone.bordas.test.ts` ("celular argentino") e `texto-legal.bordas.test.ts` ("data impossível"). Por causa deles `instalacao-limpa.test.mjs` fica com 1 caso vermelho (mobile-base, cópia limpa) e o `pnpm -r` pula consumidor e lojista (dependentes). Quando o dev corrigir, tudo volta a verde.
+
+Testes novos: mobile-base `src/sessao/{sessao-do-app.corridas,armazenamento-seguro.bordas}.test.ts`, `provedor-de-sessao.bordas.test.tsx`, `src/textos/mensagem-do-campo.bordas.test.ts` (esquemas reais, ~centenas de erros hostis), `src/componentes/{mascara-de-telefone,texto-legal}.bordas.test.ts`; apps `src/testes/rotas.https.test.tsx` (cópias idênticas; `globalThis.__DEV__ = false` em runtime vale, o app lê `__DEV__` na hora do render); scripts `assets-brand.test.mjs` (SVG/PNG/ícones/contraste), `backup-android.arquivo.test.mjs` (roda o plugin de verdade com `compileModsAsync` num projeto Android mínimo em tmpdir; a introspecção do Expo NÃO roda o `withDangerousMod`, então o XML gravado em disco só é provado assim), caso novo em `workflows-apps-expo.test.mjs` (setup-java sem `cache:` antes do prebuild; reprova o workflow do bfd7cee).
+
+Mutação (cópia em scratchpad, `cp -a packages` + `ln -s node_modules`, `node_modules/.bin/jest --silent --json --outputFile`; `cp -a apps/<app>/node_modules` para o plugin resolver `@bairrin/mobile-base` dentro da cópia): sessão/cofre/persister/provedor/url 78 mutantes, sobram só equivalentes (`Number.isNaN` do `expirou` porque o contrato valida a data, `versao` duplicada no `carregar`, `inicio ??=` sem efeito observável, `Object.hasOwn` coberto pelo `typeof string`); lint da sessão 13/13; scripts (marca, app.config, plugin, cache vitest) 31/34 (sobram V1 equivalente, V3 = lacuna, K5 coberto por `apps-expo.test.mjs`). Mutante que soma `undefined` a um objeto serializado é inválido (V3).
+
+Armadilhas: `iniciar()` antes de `entrar` carrega a sessão em cache e esconde a falha de leitura do cofre (teste da troca de conta sem `iniciar`). Fila falsa com `segurar` (promessa) prende `limpar` e prova que o login só aparece depois da limpeza (S8/S15/S17 sobreviviam sem isso). `act(() => entrar())` não tem `.catch`: capture dentro de `act(async ...)`. Toque duplo em `sair()` faz 2 DELETE com o mesmo token (inofensivo, não testado). `pnpm exec eslint` com `no-unsafe-*` reprova `jest.fn` sem tipo: declare `jest.Mock<Promise<boolean>, []>`.
+
+Q35: `--fsModuleCachePath=node_modules/.vitest-cache` em tokens, contratos, cliente-api, painel e api. Sonda com metadado de lockfile obsoleto em todo cache: `pnpm --workspace-concurrency=5` com os 5 vitest 4/4 sem ENOTEMPTY; controle antigo (cache único) 3 falhas em 30, por pacote 0 em 30. O teste estrutural `vitest-cache-por-pacote.test.mjs` não pega caminho absoluto igual em dois pacotes (usa `join(dir, flag)`) e `--fsModuleCachePath` único em um só pacote é inofensivo.
+
+Estabilidade (14 núcleos, 16 laços de CPU): `pnpm -r` sob carga 1m19, api 1515/1515, painel 478, instalacao-limpa mobile-base 18 s, consumidor 47 s, lojista 45 s (limite 120 s por pacote); 3/3 sem falha instável. Logs em `scratchpad/m2qa/estab-*.log` e `final-*.log`.
+
+Brand: `assets/brand/png/*.png` regenerados pelo Chrome headless (`gerar-png.sh`) saem idênticos ao commitado (diferença 0 por pixel); contrastes da spec conferem (12,18; 6,04; 3,55). Pino do ícone adaptativo cabe no círculo de 33 dp.
+
+Julgamento do risco do dev (limpeza da 1ª abertura apaga revogação pendente): baixo; os tokens antigos ficam ilegíveis (Keychain `ThisDeviceOnly`), só vivem no servidor até 30 dias. Melhor: não apagar `bairrin.revogacao-pendente` (só revoga, nunca autentica) e mover a sessão antiga para a pendência; custa mudar 2 asserções do cofre.

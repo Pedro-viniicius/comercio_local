@@ -1,7 +1,7 @@
 // Bordas da rota inicial (QA, M1): endereço com espaços, endereço em branco e respostas ruins da
 // API pelo cliente real (`@bairrin/cliente-api`) com o `fetch` trocado por um falso.
 import { renderRouter, screen } from 'expo-router/testing-library';
-import { textos } from '../textos/pt-BR.ts';
+import { textos as textosComuns } from '@bairrin/mobile-base';
 
 const ENDERECO = 'EXPO_PUBLIC_API_URL';
 const original = process.env[ENDERECO];
@@ -33,7 +33,7 @@ describe('rota inicial, bordas', () => {
 
     await abrir('  https://api.exemplo.test  ');
 
-    expect(await screen.findByText(textos.estadoDaApi.disponivel)).toBeOnTheScreen();
+    expect(await screen.findByText(textosComuns.estadoDaApi.disponivel)).toBeOnTheScreen();
     expect(buscar).toHaveBeenCalledWith('https://api.exemplo.test/v1/saude', expect.anything());
   });
 
@@ -45,7 +45,7 @@ describe('rota inicial, bordas', () => {
 
       await abrir(valor);
 
-      expect(await screen.findByText(textos.estadoDaApi.semConfiguracao)).toBeOnTheScreen();
+      expect(await screen.findByText(textosComuns.estadoDaApi.semConfiguracao)).toBeOnTheScreen();
       expect(buscar).not.toHaveBeenCalled();
     },
   );
@@ -55,8 +55,8 @@ describe('rota inicial, bordas', () => {
 
     await abrir('https://api.exemplo.test');
 
-    expect(await screen.findByText(textos.estadoDaApi.erroDaApi)).toBeOnTheScreen();
-    expect(screen.queryByText(textos.estadoDaApi.semConexao)).toBeNull();
+    expect(await screen.findByText(textosComuns.estadoDaApi.erroDaApi)).toBeOnTheScreen();
+    expect(screen.queryByText(textosComuns.estadoDaApi.semConexao)).toBeNull();
   });
 
   it('mostra erro da API quando a resposta 200 foge do contrato', async () => {
@@ -66,6 +66,6 @@ describe('rota inicial, bordas', () => {
 
     await abrir('https://api.exemplo.test');
 
-    expect(await screen.findByText(textos.estadoDaApi.erroDaApi)).toBeOnTheScreen();
+    expect(await screen.findByText(textosComuns.estadoDaApi.erroDaApi)).toBeOnTheScreen();
   });
 });

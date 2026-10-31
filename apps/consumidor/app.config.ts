@@ -9,6 +9,9 @@ const config: ExpoConfig = {
   scheme: 'bairrin',
   version: '0.1.0',
   orientation: 'portrait',
+  // Ícones de `assets/brand/png/`, gerados por `assets/brand/gerar-png.sh` a partir dos SVGs da
+  // identidade (spec 00-nome-e-identidade.md).
+  icon: '../../assets/brand/png/icone-ios-1024.png',
   // Sem `userInterfaceStyle`: o app fica no tema claro, o único do MVP
   // (docs/produto/specs/00-design-system.md, "Modo escuro"). Definir o campo exigiria o
   // expo-system-ui só para repetir esse padrão.
@@ -18,9 +21,14 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'br.com.bairrin.consumidor',
+    adaptiveIcon: {
+      foregroundImage: '../../assets/brand/png/icone-android-frente-1024.png',
+      monochromeImage: '../../assets/brand/png/icone-android-mono-1024.png',
+      backgroundColor: '#1F5BD1',
+    },
     // O padrão do prebuild liga o Auto Backup do Google Drive: cache e fila offline iriam para fora
-    // do aparelho (S119). No Android 12+ a transferência entre aparelhos ignora este campo; as
-    // `dataExtractionRules` ficam para a etapa 12 do plano 01b.
+    // do aparelho (S119). No Android 12+ a transferência entre aparelhos ignora este campo: quem a
+    // fecha são as `dataExtractionRules` do plugin `@bairrin/mobile-base`.
     allowBackup: false,
     // Permissões do template e do expo-file-system que o app não usa (S120). Localização e câmera
     // entram quando a funcionalidade pedir.
@@ -34,8 +42,12 @@ const config: ExpoConfig = {
   plugins: [
     // Sem a rota `_sitemap` no build de produção (S122).
     ['expo-router', { sitemap: false }],
-    // Tira as entradas do SecureStore do backup do Android (S119).
-    ['expo-secure-store', { configureAndroidBackup: true }],
+    // As regras de backup ficam com o plugin do Bairrin, abaixo, que também exclui o SecureStore
+    // (S119). Sem biometria no MVP: sem `NSFaceIDUsageDescription` (o padrão do plugin é um texto em
+    // inglês no Info.plist).
+    ['expo-secure-store', { configureAndroidBackup: false, faceIDPermission: false }],
+    // Regras de extração do Android 12+: nada sai do aparelho por backup ou transferência (S119).
+    '@bairrin/mobile-base',
   ],
 };
 

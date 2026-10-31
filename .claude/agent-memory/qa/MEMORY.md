@@ -8,4 +8,5 @@
 - [Etapa 16 do 01b: HTTP de identidade (grupo E)](etapa-16-http-identidade.md) — R1: APROVADO COM RESSALVAS, Q30 baixo, testes novos, mutação 26/26, armadilhas do supertest e do migracao
 - [M1: apps Expo e mobile-base (8/9 do 01a, 1b do 01b)](grupo-m1-apps-expo-mobile-base.md) — R1: Q33-Q34 baixos; R2: tudo provado, mutação; Jest/Expo, mutação em cópia, lint de src/sessao, bundle, flakiness do pnpm test
 - [Etapa 19 do 01b: conta, privacidade, admin/conta (grupo F)](etapa-19-conta-privacidade.md) — R1: Q31/Q32 baixos, corrida real do download, causa do MaxListeners, mutação 11/11; R2: Q31 e S113 provados, mutação 10/10, armadilha do freio compartilhado
+- [M2: sessão dos apps e componentes (12 e 12a do 01b)](grupo-m2-sessao-componentes.md) — R1: Q36-Q38 baixos (testes vermelhos de propósito), mutação, Q35 provado, plugin de backup, estabilidade
 - [ENOTEMPTY do vitest e cota do /tmp](investigacao-enotempty-vitest.md) — causa (cache único + lockfile novo), sonda, correção sugerida, EDQUOT
