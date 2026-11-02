@@ -7,7 +7,7 @@
 # a CA do Supabase. Nenhuma variável de ambiente com valor real: os segredos chegam pelo Fly.
 
 # ---- 1. Build ----
-FROM node:22.23.3-trixie-slim@sha256:154ba2f4d6fec323d28e4f4bb86bba4677f1223391a1979cf521304e03a98dfa AS construcao
+FROM node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS construcao
 
 # pnpm na versão do campo `packageManager` do package.json da raiz, via corepack.
 # CHECKPOINT_DISABLE: o Prisma não consulta o servidor de versões no build.
@@ -58,7 +58,7 @@ RUN pnpm --filter api deploy --prod --ignore-scripts /saida \
     && ls node_modules/.pnpm/@prisma+engines@*/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
 
 # ---- 2. Execução ----
-FROM node:22.23.3-trixie-slim@sha256:154ba2f4d6fec323d28e4f4bb86bba4677f1223391a1979cf521304e03a98dfa
+FROM node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39
 
 ENV NODE_ENV=production \
     CHECKPOINT_DISABLE=1
