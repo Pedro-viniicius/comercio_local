@@ -45,7 +45,7 @@ ENV VITE_API_URL=https://api.bairrin.com.br
 RUN pnpm --filter painel... run build
 
 # ---- 2. Servidor ----
-FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+FROM caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
 
 # O binário da imagem oficial traz a capability `cap_net_bind_service` (para portas < 1024).
 # A porta é 8080, então a cópia sem atributos estendidos tira a capability: o processo roda sem
